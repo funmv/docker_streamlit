@@ -137,14 +137,42 @@ def main():
     with tab4:
         file_management_tab()
     
+
     # 사이드바 - 공통 설정 (맨 아래로 이동)
     with st.sidebar:
-        st.markdown("---")
-        st.markdown("🧠 **회사명:** ㈜파시디엘")
-        st.markdown("🏫 **연구실:** visLAB@PNU")
-        st.markdown("👨‍💻 **제작자:** (C)Dong2")
-        st.markdown("🛠️ **버전:** V.1.3 (06-03-2025)")
-        st.markdown("---")
+        st.markdown(
+            """
+            <style>
+            .bottom-info {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                width: 21rem;
+                max-width: 21rem;
+                background-color: var(--background-color);
+                padding: 1rem;
+                border-top: 1px solid var(--border-color);
+                z-index: 999;
+                box-sizing: border-box;
+            }
+            .bottom-info hr {
+                margin: 0.2rem 0;
+                border-color: var(--text-color-light);
+                width: 100%;
+            }
+            </style>
+            <div class="bottom-info">
+                <hr>
+                🧠 <strong>회사명:</strong> ㈜파시디엘<br>
+                🏫 <strong>연구실:</strong> visLAB@PNU<br>
+                👨‍💻 <strong>제작자:</strong> (C)Dong2<br>
+                🛠️ <strong>버전:</strong> V.1.3 (06-03-2025)<br>
+                <hr>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
+
 
 # =============================================================================
 # 탭 1: 템플릿 설계
