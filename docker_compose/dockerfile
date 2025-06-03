@@ -1,0 +1,5 @@
+FROM nginx
+WORKDIR /
+
+RUN rm -rf /etc/nginx/conf.d/default.conf
+COPY streamlit.conf /etc/nginx/conf.d/

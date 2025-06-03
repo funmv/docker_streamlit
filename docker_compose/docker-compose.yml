@@ -1,0 +1,91 @@
+services:
+  nginx:
+    container_name: streamlit-nginx
+    build:
+      context: .
+      dockerfile: dockerfile
+    ports:
+      - "80:80"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    restart: always
+    entrypoint: sh -c "
+      nginx -g 'daemon off;'"
+
+  streamlit-db:
+    container_name: streamlit-db
+    image: funmv/streamlit-db
+    volumes:
+      - /home/pashidl/streamlit/db:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
+
+  streamlit-template:
+    container_name: streamlit-template
+    image: funmv/streamlit-template
+    volumes:
+      - /home/pashidl/streamlit/template:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
+
+  streamlit-dashboard:
+    container_name: streamlit-dashboard
+    image: funmv/streamlit-dashboard
+    volumes:
+      - /home/pashidl/streamlit/dashboard:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
+
+  streamlit-extract:
+    container_name: streamlit-extract
+    image: funmv/streamlit-extract
+    environment:
+      - STREAMLIT_SERVER_MAX_UPLOAD_SIZE=1000
+      - STREAMLIT_SERVER_MAX_MESSAGE_SIZE=1000
+    volumes:
+      - /home/pashidl/streamlit/extract:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
+
+  streamlit-viewer:
+    container_name: streamlit-viewer
+    image: funmv/streamlit-viewer
+    volumes:
+      - /home/pashidl/streamlit/viewer:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
+
+  streamlit-shifter:
+    container_name: streamlit-shifter
+    image: funmv/streamlit-shifter
+    volumes:
+      - /home/pashidl/streamlit/shifter:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
