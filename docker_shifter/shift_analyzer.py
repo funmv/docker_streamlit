@@ -766,8 +766,10 @@ def main():
     st.title("📈 학습용 시계열 데이터 추출 툴")
     
     # 탭 생성 - 추후 확장을 위한 구조
-    tab1, tab2, tab3 = st.tabs(["🔍 신호 관찰", "📊 이동 실행", "📦 데이터 추출"])
-    
+    # tab1, tab2, tab3 = st.tabs(["🔍 신호 관찰", "📊 이동 실행", "📦 데이터 추출"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🔍 신호 관찰", "📊 이동 실행", "📦 데이터 추출", "🎯 유사 기동 검색"])
+
+
     # =================================================================================
     # 탭 1: 신호 분석 (메인 기능)
     # =================================================================================
@@ -1981,6 +1983,452 @@ def main():
                         st.info("📊 추출된 훈련 데이터가 없습니다.")
 
 
+        
+
+    # =================================================================================
+    # 탭 4: 유사 기동 검색 (새로운 기능)
+    # =================================================================================
+    with tab4:
+        st.header("🎯 유사 기동 검색")
+        st.markdown("기준 파일의 특정 온도 조건과 유사한 기동 패턴을 다른 파일들에서 검색합니다.")
+        
+        # 다중 파일 업로드 섹션 (탭3과 동일)
+        st.subheader("📁 다중 파일 업로드")
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.markdown("**여러 개의 FTR/Feather 파일을 업로드하세요:**")
+            search_uploaded_files = st.file_uploader(
+                "유사 기동 검색할 FTR/Feather 파일들을 선택하세요",
+                type=['ftr', 'feather'],
+                accept_multiple_files=True,
+                key="search_file_uploader"
+            )
+        
+        with col2:
+            if search_uploaded_files:
+                if st.button("📤 검색용 파일 업로드 처리", key="search_upload_btn"):
+                    st.session_state.search_uploaded_files = search_uploaded_files
+                    st.success(f"✅ {len(search_uploaded_files)}개 파일이 검색용으로 업로드되었습니다!")
+        
+        # 검색용 파일이 업로드된 경우 검색 시작
+        if 'search_uploaded_files' in st.session_state and st.session_state.search_uploaded_files:
+            search_files = st.session_state.search_uploaded_files
+            
+            st.success(f"✅ {len(search_files)}개 파일이 검색용으로 업로드되었습니다!")
+            
+            # 첫 번째 파일을 기준으로 특징 목록 확인
+            first_file = search_files[0]
+            reference_df = load_feather_file(first_file)
+            
+            if reference_df is not None:
+                st.subheader("📊 기준 파일 정보")
+                st.info(f"**기준 파일**: {first_file.name} (Shape: {reference_df.shape})")
+                
+                # 업로드된 파일 목록 표시
+                with st.expander("📋 업로드된 파일 목록"):
+                    for i, file in enumerate(search_files):
+                        try:
+                            temp_df = load_feather_file(file)
+                            if temp_df is not None:
+                                st.write(f"{i+1}. **{file.name}** - Shape: {temp_df.shape}")
+                            else:
+                                st.write(f"{i+1}. **{file.name}** - ❌ 로드 실패")
+                        except:
+                            st.write(f"{i+1}. **{file.name}** - ❌ 로드 실패")
+                
+                # 기준 파일 선택
+                st.subheader("📂 기준 파일 선택")
+                file_names = [f.name for f in search_files]
+                selected_reference_file_index = st.selectbox(
+                    "기준이 될 파일을 선택하세요",
+                    range(len(search_files)),
+                    format_func=lambda x: file_names[x],
+                    index=0,  # 기본값: 첫 번째 파일
+                    key="reference_file_selection",
+                    help="선택된 파일의 tic=80 온도값을 기준으로 다른 모든 파일과 비교합니다."
+                )
+                
+                # 기준 파일과 검색 대상 파일들 설정
+                reference_file = search_files[selected_reference_file_index]
+                search_target_files = [f for i, f in enumerate(search_files) if i != selected_reference_file_index]
+                
+                if len(search_target_files) >= 1:  # 최소 1개 이상의 검색 대상 파일 필요
+                    
+                    st.subheader("🎯 기준 온도 조건 설정")
+                    st.info(f"🎯 **기준 파일**: {reference_file.name}")
+                    st.info(f"🔍 **검색 대상**: {len(search_target_files)}개 파일 (기준 파일 제외한 모든 파일)")
+                    
+                    # 기준 파일 로드
+                    ref_df = load_feather_file(reference_file)
+                    
+                    if ref_df is not None:
+                        # 필요한 온도 특징들이 존재하는지 확인
+                        required_features = ['metal_temp_1st', 'scr_outlet_temp', 'exhaust_gas_temperature']
+                        missing_features = [feat for feat in required_features if feat not in ref_df.columns]
+                        
+                        if missing_features:
+                            st.error(f"❌ 기준 파일에서 필요한 특징이 누락되었습니다: {missing_features}")
+                            st.write(f"**사용 가능한 컬럼**: {list(ref_df.columns)}")
+                        else:
+                            # tic=80에서 온도값 추출
+                            if len(ref_df) > 80:
+                                reference_temps = {
+                                    'metal_temp_1st': ref_df.loc[80, 'metal_temp_1st'],
+                                    'scr_outlet_temp': ref_df.loc[80, 'scr_outlet_temp'],
+                                    'exhaust_gas_temperature': ref_df.loc[80, 'exhaust_gas_temperature']
+                                }
+                                
+                                # 기준 온도값 표시
+                                st.subheader("🌡️ 기준 온도값 (tic=80)")
+                                col1, col2, col3 = st.columns(3)
+                                
+                                with col1:
+                                    st.metric("Metal Temp 1st", f"{reference_temps['metal_temp_1st']:.2f}°C")
+                                with col2:
+                                    st.metric("SCR Outlet Temp", f"{reference_temps['scr_outlet_temp']:.2f}°C")
+                                with col3:
+                                    st.metric("Exhaust Gas Temp", f"{reference_temps['exhaust_gas_temperature']:.2f}°C")
+                                
+                                # 가중치 설정
+                                st.subheader("⚖️ 온도별 가중치 설정")
+                                st.markdown("각 온도 특징의 중요도를 설정하세요. 높은 값일수록 해당 온도의 유사성이 더 중요하게 고려됩니다.")
+                                
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    weight_metal = st.slider(
+                                        "Metal Temp 1st 가중치",
+                                        min_value=0.0,
+                                        max_value=2.0,
+                                        value=1.0,
+                                        step=0.1,
+                                        key="weight_metal"
+                                    )
+                                with col2:
+                                    weight_scr = st.slider(
+                                        "SCR Outlet Temp 가중치",
+                                        min_value=0.0,
+                                        max_value=2.0,
+                                        value=1.0,
+                                        step=0.1,
+                                        key="weight_scr"
+                                    )
+                                with col3:
+                                    weight_exhaust = st.slider(
+                                        "Exhaust Gas Temp 가중치",
+                                        min_value=0.0,
+                                        max_value=2.0,
+                                        value=1.0,
+                                        step=0.1,
+                                        key="weight_exhaust"
+                                    )
+                                
+                                # 가중치 정규화 옵션
+                                normalize_weights = st.checkbox(
+                                    "가중치 정규화",
+                                    value=True,
+                                    help="가중치의 합이 1이 되도록 정규화합니다."
+                                )
+                                
+                                # 유사 기동 검색 실행
+                                st.subheader("🔍 유사 기동 검색")
+                                
+                                if st.button("🚀 유사 기동 검색 시작", key="start_similarity_search"):
+                                    with st.spinner("🔄 유사 기동 검색 중... 잠시만 기다려주세요."):
+                                        try:
+                                            # 가중치 설정
+                                            weights = np.array([weight_metal, weight_scr, weight_exhaust])
+                                            if normalize_weights and weights.sum() > 0:
+                                                weights = weights / weights.sum()
+                                            
+                                            # 기준 온도 벡터
+                                            reference_vector = np.array([
+                                                reference_temps['metal_temp_1st'],
+                                                reference_temps['scr_outlet_temp'],
+                                                reference_temps['exhaust_gas_temperature']
+                                            ])
+                                            
+                                            # 각 파일에서 tic=80의 온도값 추출 및 거리 계산
+                                            similarity_results = []
+                                            
+                                            for target_file in search_target_files:
+                                                try:
+                                                    target_df = load_feather_file(target_file)
+                                                    if target_df is not None and len(target_df) > 80:
+                                                        # 필요한 특징들이 존재하는지 확인
+                                                        target_missing = [feat for feat in required_features if feat not in target_df.columns]
+                                                        if not target_missing:
+                                                            # tic=80에서 온도값 추출
+                                                            target_temps = np.array([
+                                                                target_df.loc[80, 'metal_temp_1st'],
+                                                                target_df.loc[80, 'scr_outlet_temp'],
+                                                                target_df.loc[80, 'exhaust_gas_temperature']
+                                                            ])
+                                                            
+                                                            # 가중 유클리드 거리 계산
+                                                            weighted_diff = weights * (reference_vector - target_temps)
+                                                            euclidean_distance = np.sqrt(np.sum(weighted_diff ** 2))
+                                                            
+                                                            similarity_results.append({
+                                                                'file_name': target_file.name,
+                                                                'distance': euclidean_distance,
+                                                                'metal_temp_1st': target_temps[0],
+                                                                'scr_outlet_temp': target_temps[1],
+                                                                'exhaust_gas_temperature': target_temps[2],
+                                                                'file_object': target_file
+                                                            })
+                                                        else:
+                                                            st.warning(f"⚠️ {target_file.name}에서 누락된 특징: {target_missing}")
+                                                    else:
+                                                        st.warning(f"⚠️ {target_file.name}: 데이터가 부족합니다 (tic=80 이상 필요)")
+                                                        
+                                                except Exception as e:
+                                                    st.warning(f"⚠️ {target_file.name} 처리 중 오류: {str(e)}")
+                                            
+                                            # 거리순으로 정렬하여 상위 5개 선택
+                                            if similarity_results:
+                                                similarity_results.sort(key=lambda x: x['distance'])
+                                                top_5_similar = similarity_results[:5]
+                                                
+                                                # 결과 저장
+                                                st.session_state.similarity_results = similarity_results
+                                                st.session_state.top_5_similar = top_5_similar
+                                                st.session_state.reference_temps = reference_temps
+                                                st.session_state.search_weights = weights
+                                                st.session_state.search_completed = True
+                                                
+                                            else:
+                                                st.error("❌ 검색 가능한 파일이 없습니다.")
+                                                
+                                        except Exception as e:
+                                            st.error(f"❌ 유사 기동 검색 중 오류 발생: {str(e)}")
+                                
+                                # 검색 결과 표시
+                                if (hasattr(st.session_state, 'search_completed') and 
+                                    st.session_state.search_completed and 
+                                    hasattr(st.session_state, 'top_5_similar')):
+                                    
+                                    st.markdown("---")
+                                    st.subheader("🏆 유사 기동 검색 결과")
+                                    
+                                    top_5_similar = st.session_state.top_5_similar
+                                    reference_temps = st.session_state.reference_temps
+                                    search_weights = st.session_state.search_weights
+                                    
+                                    if top_5_similar:
+                                        # 검색 설정 요약
+                                        st.info(f"🎯 **기준 파일**: {reference_file.name} | **가중치**: Metal({search_weights[0]:.1f}), SCR({search_weights[1]:.1f}), Exhaust({search_weights[2]:.1f})")
+                                        
+                                        # 상위 5개 결과 표시
+                                        st.markdown("### 🥇 가장 유사한 기동 TOP 5")
+                                        
+                                        for i, result in enumerate(top_5_similar, 1):
+                                            with st.expander(f"🏅 {i}위: {result['file_name']} (거리: {result['distance']:.4f})"):
+                                                col1, col2 = st.columns(2)
+                                                
+                                                with col1:
+                                                    st.markdown("**🌡️ 온도 비교**")
+                                                    comparison_data = {
+                                                        '특징': ['Metal Temp 1st', 'SCR Outlet Temp', 'Exhaust Gas Temp'],
+                                                        '기준값': [
+                                                            f"{reference_temps['metal_temp_1st']:.2f}°C",
+                                                            f"{reference_temps['scr_outlet_temp']:.2f}°C",
+                                                            f"{reference_temps['exhaust_gas_temperature']:.2f}°C"
+                                                        ],
+                                                        '비교값': [
+                                                            f"{result['metal_temp_1st']:.2f}°C",
+                                                            f"{result['scr_outlet_temp']:.2f}°C",
+                                                            f"{result['exhaust_gas_temperature']:.2f}°C"
+                                                        ],
+                                                        '차이': [
+                                                            f"{abs(reference_temps['metal_temp_1st'] - result['metal_temp_1st']):.2f}°C",
+                                                            f"{abs(reference_temps['scr_outlet_temp'] - result['scr_outlet_temp']):.2f}°C",
+                                                            f"{abs(reference_temps['exhaust_gas_temperature'] - result['exhaust_gas_temperature']):.2f}°C"
+                                                        ]
+                                                    }
+                                                    
+                                                    comparison_df = pd.DataFrame(comparison_data)
+                                                    st.dataframe(comparison_df, use_container_width=True, hide_index=True)
+                                                
+                                                with col2:
+                                                    st.markdown("**📊 상세 정보**")
+                                                    st.write(f"**파일명**: {result['file_name']}")
+                                                    st.write(f"**유클리드 거리**: {result['distance']:.6f}")
+                                                    st.write(f"**순위**: {i}/5")
+                                                    
+                                                    # 각 온도별 가중 기여도
+                                                    metal_contrib = search_weights[0] * abs(reference_temps['metal_temp_1st'] - result['metal_temp_1st'])
+                                                    scr_contrib = search_weights[1] * abs(reference_temps['scr_outlet_temp'] - result['scr_outlet_temp'])
+                                                    exhaust_contrib = search_weights[2] * abs(reference_temps['exhaust_gas_temperature'] - result['exhaust_gas_temperature'])
+                                                    
+                                                    st.write("**가중 기여도**:")
+                                                    st.write(f"- Metal: {metal_contrib:.4f}")
+                                                    st.write(f"- SCR: {scr_contrib:.4f}")
+                                                    st.write(f"- Exhaust: {exhaust_contrib:.4f}")
+                                        
+                                        # 전체 결과 요약 테이블
+                                        st.markdown("### 📋 검색 결과 요약")
+                                        
+                                        summary_data = []
+                                        for i, result in enumerate(top_5_similar, 1):
+                                            summary_data.append({
+                                                '순위': i,
+                                                '파일명': result['file_name'],
+                                                '유클리드 거리': f"{result['distance']:.6f}",
+                                                'Metal Temp': f"{result['metal_temp_1st']:.2f}°C",
+                                                'SCR Temp': f"{result['scr_outlet_temp']:.2f}°C",
+                                                'Exhaust Temp': f"{result['exhaust_gas_temperature']:.2f}°C"
+                                            })
+                                        
+                                        summary_df = pd.DataFrame(summary_data)
+                                        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                                        
+                                        # 시각화 비교 기능 추가
+                                        st.markdown("### 📈 시계열 데이터 비교 시각화")
+                                        
+                                        # 기준 파일과 비교할 파일들 선택
+                                        st.markdown("**기준 파일과 검색 결과 파일들의 시계열 데이터를 비교해보세요:**")
+                                        
+                                        # 비교할 파일들 선택 (기준 파일 + TOP 5 결과)
+                                        available_files_for_plot = [reference_file] + [r['file_object'] for r in top_5_similar]
+                                        available_file_names = [f"🎯 {reference_file.name} (기준)"] + [f"🏅 {i+1}위: {r['file_name']}" for i, r in enumerate(top_5_similar)]
+                                        
+                                        selected_plot_file_indices = st.multiselect(
+                                            "비교 시각화할 파일들을 선택하세요",
+                                            range(len(available_files_for_plot)),
+                                            format_func=lambda x: available_file_names[x],
+                                            default=[0, 1] if len(available_files_for_plot) > 1 else [0],  # 기본값: 기준 파일 + 1위
+                                            key="similarity_plot_file_selection",
+                                            help="선택된 파일들의 시계열 데이터를 함께 비교할 수 있습니다."
+                                        )
+                                        
+                                        selected_plot_files = [available_files_for_plot[i] for i in selected_plot_file_indices]
+                                        
+                                        if len(selected_plot_files) >= 1:
+                                            # 특징 선택 (기준 파일 기준)
+                                            ref_df_for_plot = load_feather_file(reference_file)
+                                            if ref_df_for_plot is not None:
+                                                selected_plot_features = st.multiselect(
+                                                    "비교할 특징들을 선택하세요",
+                                                    ref_df_for_plot.columns.tolist(),
+                                                    default=['metal_temp_1st', 'scr_outlet_temp', 'exhaust_gas_temperature'] if all(feat in ref_df_for_plot.columns for feat in ['metal_temp_1st', 'scr_outlet_temp', 'exhaust_gas_temperature']) else ref_df_for_plot.columns.tolist()[:3],
+                                                    key="similarity_feature_selection",
+                                                    help="선택된 특징들을 각 파일별로 비교합니다."
+                                                )
+                                                
+                                                if selected_plot_features:
+                                                    # 시각화 설정 (탭3과 동일한 구조)
+                                                    st.markdown("**⚙️ 시각화 설정**")
+                                                    
+                                                    col1, col2, col3 = st.columns(3)
+                                                    with col1:
+                                                        similarity_downsample_rate = st.slider(
+                                                            "📉 다운샘플 비율 (1/N)", 
+                                                            min_value=1, max_value=100, value=10,
+                                                            key="similarity_downsample"
+                                                        )
+                                                    with col2:
+                                                        similarity_num_segments = st.selectbox(
+                                                            "📊 데이터 분할 수",
+                                                            options=[1, 2, 3, 4, 5],
+                                                            index=2,  # 기본값: 3등분
+                                                            help="전체 데이터를 몇 등분할지 선택",
+                                                            key="similarity_segments"
+                                                        )
+                                                    with col3:
+                                                        similarity_selected_segment = st.selectbox(
+                                                            "🎯 분석 구간 선택",
+                                                            options=list(range(similarity_num_segments)),
+                                                            format_func=lambda x: f"구간 {x+1}",
+                                                            index=0,  # 기본값: 첫 번째 구간
+                                                            help="분석할 구간을 선택",
+                                                            key="similarity_segment_select"
+                                                        )
+                                                    
+                                                    similarity_crosshair = st.checkbox("▶️ 십자선 Hover 활성화", value=True, key="similarity_crosshair")
+                                                    
+                                                    # 시계열 비교 플롯 생성
+                                                    try:
+                                                        fig_timeseries = create_multi_file_plot(
+                                                            selected_plot_files,
+                                                            selected_plot_features,
+                                                            similarity_downsample_rate,
+                                                            similarity_crosshair,
+                                                            similarity_num_segments,
+                                                            similarity_selected_segment
+                                                        )
+                                                        
+                                                        # 제목 수정
+                                                        segment_info = f"구간 {similarity_selected_segment + 1}/{similarity_num_segments}"
+                                                        fig_timeseries.update_layout(title=f"📊 유사 기동 비교 분석 ({segment_info})")
+                                                        
+                                                        st.plotly_chart(fig_timeseries, use_container_width=True)
+                                                        
+                                                        # 비교 정보 표시
+                                                        st.markdown("**📋 비교 중인 파일:**")
+                                                        for i, idx in enumerate(selected_plot_file_indices):
+                                                            if idx == 0:
+                                                                st.write(f"🎯 **기준**: {reference_file.name}")
+                                                            else:
+                                                                rank = idx  # 1위부터 시작
+                                                                result = top_5_similar[rank-1]
+                                                                st.write(f"🏅 **{rank}위**: {result['file_name']} (거리: {result['distance']:.4f})")
+                                                        
+                                                    except Exception as e:
+                                                        st.error(f"❌ 시계열 비교 플롯 생성 중 오류: {str(e)}")
+                                                else:
+                                                    st.info("🎯 비교할 특징을 선택해주세요.")
+                                            else:
+                                                st.error("❌ 기준 파일을 로드할 수 없습니다.")
+                                        else:
+                                            st.info("📂 비교할 파일을 선택해주세요.")
+                                        
+                                        # 상세 분석 정보
+                                        with st.expander("📊 상세 분석 정보"):
+                                            st.markdown("**🔍 검색 통계**")
+                                            all_results = st.session_state.similarity_results
+                                            
+                                            stats_col1, stats_col2, stats_col3 = st.columns(3)
+                                            with stats_col1:
+                                                st.metric("검색된 파일 수", len(all_results))
+                                            with stats_col2:
+                                                min_distance = min([r['distance'] for r in all_results])
+                                                st.metric("최소 거리", f"{min_distance:.6f}")
+                                            with stats_col3:
+                                                max_distance = max([r['distance'] for r in all_results])
+                                                st.metric("최대 거리", f"{max_distance:.6f}")
+                                            
+                                            st.markdown("**📋 전체 검색 결과**")
+                                            full_results_data = []
+                                            for i, result in enumerate(all_results, 1):
+                                                full_results_data.append({
+                                                    '순위': i,
+                                                    '파일명': result['file_name'],
+                                                    '유클리드 거리': f"{result['distance']:.6f}",
+                                                    'Metal Temp': f"{result['metal_temp_1st']:.2f}°C",
+                                                    'SCR Temp': f"{result['scr_outlet_temp']:.2f}°C",
+                                                    'Exhaust Temp': f"{result['exhaust_gas_temperature']:.2f}°C"
+                                                })
+                                            
+                                            full_results_df = pd.DataFrame(full_results_data)
+                                            st.dataframe(full_results_df, use_container_width=True, hide_index=True)
+                                    
+                                    else:
+                                        st.warning("⚠️ 유사한 기동을 찾을 수 없습니다.")
+                            else:
+                                st.error("❌ 기준 파일의 데이터가 부족합니다. tic=80 이상의 데이터가 필요합니다.")
+                    else:
+                        st.error("❌ 기준 파일을 로드할 수 없습니다.")
+                        
+                else:
+                    st.warning("⚠️ 유사 기동 검색을 위해서는 최소 2개 이상의 파일이 필요합니다. (기준 파일 1개 + 검색 대상 파일 1개 이상)")
+                    st.info("현재 업로드된 파일이 1개뿐입니다. 추가 파일을 업로드해주세요.")
+            else:
+                st.error("❌ 기준 파일을 로드할 수 없습니다.")
+        else:
+            st.info("📁 유사 기동 검색을 위해 다중 파일을 업로드하세요.")
+    
+
 
 
 # =================================================================================
@@ -1988,6 +2436,8 @@ def main():
 # =================================================================================
 if __name__ == "__main__":
     main()
+
+
 
 
 
