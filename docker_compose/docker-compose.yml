@@ -63,7 +63,7 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 2G
+          memory: 8G
     restart: always
 
   streamlit-viewer:
@@ -87,5 +87,5 @@ services:
       resources:
         limits:
           cpus: "2"
-          memory: 2G
+          memory: 8G
     restart: always
