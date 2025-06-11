@@ -1411,7 +1411,7 @@ def main():
                                                     '최소값': f"{feature_data.min():.4f}",
                                                     '최대값': f"{feature_data.max():.4f}",
                                                     '데이터 포인트': f"{len(feature_data):,}",
-                                                    '결측값': feature_data.isna().sum()
+                                                    '결측값': int(feature_data.isna().sum())
                                                 })
                                 except Exception as e:
                                     st.warning(f"⚠️ {file.name} 통계 계산 중 오류: {str(e)}")
@@ -1615,9 +1615,9 @@ def main():
                                         'extraction_params': {
                                             'start_position': start_position,
                                             'end_position': end_position,
-                                            'lookback_length': lookback_length,
-                                            'horizon_length': horizon_length,
-                                            'step_gap': step_gap,
+                                            'lookback_length': str(lookback_length),
+                                            'horizon_length': str(horizon_length),
+                                            'step_gap': str(step_gap),
                                             'train_ratio': train_ratio,
                                             'use_positional_encoding': use_positional_encoding,
                                             'tick_interval': tick_interval
@@ -1912,9 +1912,9 @@ def main():
                                 param_df = pd.DataFrame([
                                     {'파라미터': '시작 위치', '값': f"{extraction_params.get('start_position', 'N/A'):,}"},
                                     {'파라미터': '종료 위치', '값': f"{extraction_params.get('end_position', 'N/A'):,}"},
-                                    {'파라미터': '과거 참조 길이', '값': extraction_params.get('lookback_length', 'N/A')},
-                                    {'파라미터': '예측 구간 길이', '값': extraction_params.get('horizon_length', 'N/A')},
-                                    {'파라미터': '스텝 간격', '값': extraction_params.get('step_gap', 'N/A')},
+                                    {'파라미터': '과거 참조 길이', '값': str(extraction_params.get('lookback_length', 'N/A'))},
+                                    {'파라미터': '예측 구간 길이', '값': str(extraction_params.get('horizon_length', 'N/A'))},
+                                    {'파라미터': '스텝 간격', '값': str(extraction_params.get('step_gap', 'N/A'))},
                                     {'파라미터': '훈련 비율', '값': f"{extraction_params.get('train_ratio', 0):.1%}"},
                                     {'파라미터': 'Positional Encoding', '값': '사용' if extraction_params.get('use_positional_encoding', False) else '미사용'},
                                     {'파라미터': '틱 간격', '값': f"{extraction_params.get('tick_interval', 'N/A')}초"}
@@ -1930,9 +1930,9 @@ def main():
                                     {'항목': '검증 샘플 수', '값': f"{data_info.get('val_samples', 0):,}"},
                                     {'항목': '입력 형태', '값': str(data_info.get('input_shape', 'N/A'))},
                                     {'항목': '출력 형태', '값': str(data_info.get('output_shape', 'N/A'))},
-                                    {'항목': '시간 특징 수', '값': feature_info.get('time_features', 'N/A')},
-                                    {'항목': '데이터 특징 수', '값': feature_info.get('data_features', 'N/A')},
-                                    {'항목': '전체 특징 수', '값': feature_info.get('total_features', 'N/A')},
+                                    {'항목': '시간 특징 수', '값': str(feature_info.get('time_features', 'N/A'))},
+                                    {'항목': '데이터 특징 수', '값': str(feature_info.get('data_features', 'N/A'))},
+                                    {'항목': '전체 특징 수', '값': str(feature_info.get('total_features', 'N/A'))},
                                     {'항목': '생성 시간', '값': metadata.get('creation_time', 'N/A')[:19] if metadata.get('creation_time') else 'N/A'}
                                 ])
                                 st.dataframe(info_df, use_container_width=True, hide_index=True)
