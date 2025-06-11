@@ -162,9 +162,32 @@ def downsample(data, rate):
     return data[::rate]
 
 # =====================================
+# 세션 상태 초기화
+# =====================================
+def initialize_session_state():
+    """세션 상태 초기화"""
+    if 'matching_completed' not in st.session_state:
+        st.session_state.matching_completed = False
+    if 'st_groups' not in st.session_state:
+        st.session_state.st_groups = []
+    if 'et_groups' not in st.session_state:
+        st.session_state.et_groups = []
+    if 'signal' not in st.session_state:
+        st.session_state.signal = None
+    if 'cp_df' not in st.session_state:
+        st.session_state.cp_df = None
+    if 'offset_1' not in st.session_state:
+        st.session_state.offset_1 = 500
+    if 'offset_2' not in st.session_state:
+        st.session_state.offset_2 = 500
+
+# =====================================
 # 메인 애플리케이션
 # =====================================
 def main():
+    # 세션 상태 초기화
+    initialize_session_state()
+    
     st.title("🚀 신호 매치 및 추출 앱")
     
     # 탭 생성
@@ -211,6 +234,39 @@ def signal_matching_tab():
         return
 
     # 사이드바 설정
+    template_1, template_2, templates_loaded = setup_sidebar()
+    
+    if not templates_loaded:
+        st.warning("⚠️ 템플릿 파일들을 먼저 업로드해주세요.")
+        return
+
+    # 전처리 적용
+    signal = preprocess_signal(signal)
+    template_1 = preprocess_signal(template_1)
+    template_2 = preprocess_signal(template_2)
+
+    # 매칭 설정 폼
+    matching_params = setup_matching_form()
+
+    if matching_params['submitted'] and templates_loaded:
+        # 매칭 수행
+        perform_matching(signal, template_1, template_2, matching_params, cp_df)
+
+    # 매칭이 완료된 경우에만 추출 버튼 표시
+    if st.session_state.matching_completed:
+        st.markdown("---")
+        st.subheader("🔧 신호 추출")
+        
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            if st.button("✂️ 기동 신호 추출 및 시각화", type="primary"):
+                with st.spinner("신호 추출 중..."):
+                    perform_extraction()
+        with col2:
+            st.info(f"추출 준비 완료: 시작 그룹 {len(st.session_state.st_groups)}개, 종료 그룹 {len(st.session_state.et_groups)}개")
+
+def setup_sidebar():
+    """사이드바 설정"""
     with st.sidebar:
         st.markdown("🧬 **Template 파일 업로드 (.npy)**")
 
@@ -223,8 +279,8 @@ def signal_matching_tab():
 
         # 기본값으로 로드 (파일이 존재할 경우에만)
         try:
-            if os.path.exists('fuel_temp_st.npy'):
-                template_1 = np.load('fuel_temp_st.npy')
+            if os.path.exists('template_ignit_st.npy'):
+                template_1 = np.load('template_ignit_st.npy')
                 st.info("✅ 기본 Template 1 로드됨")
             else:
                 st.warning("⚠️ 기본 Template 1 파일 없음")
@@ -232,8 +288,8 @@ def signal_matching_tab():
             st.error(f"❗ 기본 Template 1 로드 실패: {e}")
 
         try:
-            if os.path.exists('fuel_temp_et.npy'):
-                template_2 = np.load('fuel_temp_et.npy')
+            if os.path.exists('template_ignit_et.npy'):
+                template_2 = np.load('template_ignit_et.npy')
                 st.info("✅ 기본 Template 2 로드됨")
             else:
                 st.warning("⚠️ 기본 Template 2 파일 없음")
@@ -264,90 +320,126 @@ def signal_matching_tab():
         # 템플릿이 모두 로드되지 않은 경우 매칭 기능 비활성화
         templates_loaded = template_1 is not None and template_2 is not None
 
-        if not templates_loaded:
-            st.warning("⚠️ 템플릿 파일들을 먼저 업로드해주세요.")
-            return
+        if templates_loaded:
+            # 템플릿 시각화
+            st.header("🔧 매치 설정")
+            
+            st.markdown("📉 **Template 1 (기동 시작)**")
+            fig_t1, ax1 = plt.subplots(figsize=(3, 1.5))
+            ax1.plot(template_1, linewidth=0.8)
+            ax1.set_title("시작 템플릿", fontsize=10)
+            st.pyplot(fig_t1)
+            plt.close(fig_t1)
 
-        # 전처리 적용
-        signal = preprocess_signal(signal)
-        template_1 = preprocess_signal(template_1)
-        template_2 = preprocess_signal(template_2)
+            st.markdown("📈 **Template 2 (기동 종료)**")
+            fig_t2, ax2 = plt.subplots(figsize=(3, 1.5))
+            ax2.plot(template_2, linewidth=0.8, color='orange')
+            ax2.set_title("종료 템플릿", fontsize=10)
+            st.pyplot(fig_t2)
+            plt.close(fig_t2)
 
-        # 템플릿 시각화
-        st.header("🔧 매치 설정")
-        
-        st.markdown("📉 **Template 1 (기동 시작)**")
-        fig_t1, ax1 = plt.subplots(figsize=(3, 1.5))
-        ax1.plot(template_1, linewidth=0.8)
-        ax1.set_title("시작 템플릿", fontsize=10)
-        st.pyplot(fig_t1)
-        plt.close(fig_t1)
+            st.markdown("---")
 
-        st.markdown("📈 **Template 2 (기동 종료)**")
-        fig_t2, ax2 = plt.subplots(figsize=(3, 1.5))
-        ax2.plot(template_2, linewidth=0.8, color='orange')
-        ax2.set_title("종료 템플릿", fontsize=10)
-        st.pyplot(fig_t2)
-        plt.close(fig_t2)
+            st.header("🔄 매칭기 설정")
+            max_diff = st.selectbox(
+                "연속으로 간주할 최대 차이값",
+                options=[1, 10, 50, 100, 200, 500, 1000],
+                index=2,  # 기본값을 50으로 설정 (index 2)
+                help="두 값 사이의 차이가 이 값 이하이면 연속으로 간주합니다."
+            )
+            st.markdown("---")
 
-        st.markdown("---")
-
-        st.header("🔄 매칭기 설정")
-        max_diff = st.selectbox(
-            "연속으로 간주할 최대 차이값",
-            options=[1, 10, 50, 100, 200, 500, 1000],
-            index=2,  # 기본값을 50으로 설정 (index 2)
-            help="두 값 사이의 차이가 이 값 이하이면 연속으로 간주합니다."
+        st.markdown(
+            """
+            <style>
+            .bottom-info {
+                position: fixed;
+                bottom: 0;
+                left: 0;
+                width: 21rem;
+                max-width: 21rem;
+                background-color: var(--background-color);
+                padding: 1rem;
+                border-top: 1px solid var(--border-color);
+                z-index: 999;
+                box-sizing: border-box;
+            }
+            .bottom-info hr {
+                margin: 0.2rem 0;
+                border-color: var(--text-color-light);
+                width: 100%;
+            }
+            </style>
+            <div class="bottom-info">
+                <hr>
+                🧠 <strong>회사명:</strong> ㈜파시디엘<br>
+                🏫 <strong>연구실:</strong> visLAB@PNU<br>
+                👨‍💻 <strong>제작자:</strong> (C)Dong2<br>
+                🛠️ <strong>버전:</strong> V.1.3 (06-03-2025)<br>
+                <hr>
+            </div>
+            """, 
+            unsafe_allow_html=True
         )
-        st.markdown("---")
 
-        st.markdown("🧠 **회사명:** ㈜파시디엘")
-        st.markdown("🏫 **연구실:** visLAB@PNU")
-        st.markdown("👨‍💻 **제작자:** (C)Dong2")
-        st.markdown("🛠️ **버전:** V.1.1 (06-01-2025)")
-        st.markdown("---")
+    return template_1, template_2, templates_loaded
 
-    # 매칭 설정 폼
+def setup_matching_form():
+    """매칭 설정 폼"""
     with st.form(key="matching_form"):
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("🟢 기동 시작 설정")
-            st_thres = st.slider("기동 시작 NCC Threshold", 0.0, 1.0, 0.2, 0.01)
-            st_low = st.number_input("기동 시작 신호 최소값", value=0.0)
+            st_thres = st.slider("기동 시작 NCC Threshold", 0.0, 1.0, 0.85, 0.01)
+            st_low = st.number_input("기동 시작 신호 최소값", value=-1.0)
             st_high = st.number_input("기동 시작 신호 최대값", value=1.0)
-            offset_1 = st.number_input("기동 시작 offset", value=500)
-            remove_st_idx = st.text_input("기동 시작부 제거할 그룹 인덱스 (쉼표로 구분)", value="24")
+            offset_1 = st.number_input("기동 시작 offset", value=0)
+            remove_st_idx = st.text_input("기동 시작부 제거할 그룹 인덱스 (쉼표로 구분)", value="0")
         
         with col2:
             st.subheader("🔴 기동 종료 설정")
-            et_thres = st.slider("기동 종료 NCC Threshold", 0.0, 1.0, 0.2, 0.01)
-            et_low = st.number_input("기동 종료 신호 최소값", value=5.0)
-            et_high = st.number_input("기동 종료 신호 최대값", value=8.0)
-            offset_2 = st.number_input("기동 종료 offset", value=500)
-            remove_et_idx = st.text_input("기동 종료부 제거할 그룹 인덱스 (쉼표로 구분)", value="0,20,27,34")
+            et_thres = st.slider("기동 종료 NCC Threshold", 0.0, 1.0, 0.85, 0.01)
+            et_low = st.number_input("기동 종료 신호 최소값", value=0.0)
+            et_high = st.number_input("기동 종료 신호 최대값", value=2.0)
+            offset_2 = st.number_input("기동 종료 offset", value=300)
+            remove_et_idx = st.text_input("기동 종료부 제거할 그룹 인덱스 (쉼표로 구분)", value="0")
 
-        submitted = st.form_submit_button("▶️ 매치 수행")
+        submitted = st.form_submit_button("▶️ 매치 수행", type="primary")
 
-    if submitted and templates_loaded:
-        # 매칭 수행
-        perform_matching(signal, template_1, template_2, st_thres, st_low, st_high, offset_1,
-                        et_thres, et_low, et_high, offset_2, remove_st_idx, remove_et_idx, max_diff, cp_df)
+    # 사이드바에서 max_diff 가져오기 (템플릿이 로드된 경우)
+    max_diff = 50  # 기본값
+    if 'max_diff' in st.session_state:
+        max_diff = st.session_state.max_diff
 
-def perform_matching(signal, template_1, template_2, st_thres, st_low, st_high, offset_1,
-                    et_thres, et_low, et_high, offset_2, remove_st_idx, remove_et_idx, max_diff, cp_df):
+    return {
+        'submitted': submitted,
+        'st_thres': st_thres,
+        'st_low': st_low,
+        'st_high': st_high,
+        'offset_1': offset_1,
+        'et_thres': et_thres,
+        'et_low': et_low,
+        'et_high': et_high,
+        'offset_2': offset_2,
+        'remove_st_idx': remove_st_idx,
+        'remove_et_idx': remove_et_idx,
+        'max_diff': max_diff
+    }
+
+def perform_matching(signal, template_1, template_2, params, cp_df):
     """매칭 수행 함수"""
     
     # 시작부 매칭
     ncc_start = normalized_cross_correlation(signal, template_1)
-    st_ncc_above_threshold = np.where(ncc_start > st_thres)[0]
+    st_ncc_above_threshold = np.where(ncc_start > params['st_thres'])[0]
     true_idx_st = st_ncc_above_threshold[
-        (signal[st_ncc_above_threshold] > st_low) & 
-        (signal[st_ncc_above_threshold] < st_high)
+        (signal[st_ncc_above_threshold] > params['st_low']) & 
+        (signal[st_ncc_above_threshold] < params['st_high'])
     ]    
-    st_groups = group_consecutive(true_idx_st, max_diff)
+    st_groups = group_consecutive(true_idx_st, params['max_diff'])
 
-    for idx in sorted([int(i) for i in remove_st_idx.split(',') if i.strip().isdigit()], reverse=True):
+    for idx in sorted([int(i) for i in params['remove_st_idx'].split(',') if i.strip().isdigit()], reverse=True):
         if 0 <= idx < len(st_groups):
             del st_groups[idx]
 
@@ -363,14 +455,14 @@ def perform_matching(signal, template_1, template_2, st_thres, st_low, st_high, 
 
     # 종료부 매칭
     ncc_end = normalized_cross_correlation(signal, template_2)
-    et_ncc_above_threshold = np.where(ncc_end > et_thres)[0]
+    et_ncc_above_threshold = np.where(ncc_end > params['et_thres'])[0]
     true_idx_et = et_ncc_above_threshold[
-        (signal[et_ncc_above_threshold] > et_low) & 
-        (signal[et_ncc_above_threshold] < et_high)
+        (signal[et_ncc_above_threshold] > params['et_low']) & 
+        (signal[et_ncc_above_threshold] < params['et_high'])
     ]    
-    et_groups = group_consecutive(true_idx_et, max_diff)
+    et_groups = group_consecutive(true_idx_et, params['max_diff'])
 
-    for idx in sorted([int(i) for i in remove_et_idx.split(',') if i.strip().isdigit()], reverse=True):
+    for idx in sorted([int(i) for i in params['remove_et_idx'].split(',') if i.strip().isdigit()], reverse=True):
         if 0 <= idx < len(et_groups):
             del et_groups[idx]
 
@@ -389,21 +481,18 @@ def perform_matching(signal, template_1, template_2, st_thres, st_low, st_high, 
     st.session_state.et_groups = et_groups
     st.session_state.signal = signal
     st.session_state.cp_df = cp_df
-    st.session_state.offset_1 = offset_1
-    st.session_state.offset_2 = offset_2
+    st.session_state.offset_1 = params['offset_1']
+    st.session_state.offset_2 = params['offset_2']
+    st.session_state.matching_completed = True
 
     # 시각화
-    create_visualization(signal, st_groups, et_groups, offset_1, offset_2)
-
-    # 추출 버튼 표시
-    if st.button("✂️ 기동 신호 추출 및 시각화"):
-        perform_extraction(signal, cp_df, st_groups, et_groups, offset_1, offset_2)
+    create_visualization(signal, st_groups, et_groups, params['offset_1'], params['offset_2'])
 
 def create_visualization(signal, st_groups, et_groups, offset_1, offset_2):
     """매칭 결과 시각화"""
     
-    # 샘플링 비율 선택 위젯 추가 (기본값: 10)
-    sampling_rate = st.slider("샘플링 비율 선택", min_value=1, max_value=50, value=10, step=1)
+    # 샘플링 비율 선택 위젯 추가 (기본값: 1)
+    sampling_rate = st.slider("샘플링 비율 선택", min_value=1, max_value=50, value=1, step=1)
 
     # 샘플링된 신호와 인덱스 생성
     sampled_signal = downsample(signal, sampling_rate)
@@ -425,7 +514,7 @@ def create_visualization(signal, st_groups, et_groups, offset_1, offset_2):
 
     # 매칭 위치 표시 (샘플링 적용하지 않음 - 정확한 위치 유지)
     for i, grp in enumerate(st_groups):
-        x = grp[0] - offset_1
+        x = grp[0] - offset_1 + len(grp)//2  # Kang 수정 부분
         fig1.add_trace(
             go.Scatter(
                 x=[x, x],
@@ -505,8 +594,16 @@ def create_visualization(signal, st_groups, et_groups, offset_1, offset_2):
     # 플롯 표시
     st.plotly_chart(fig2, use_container_width=True)
 
-def perform_extraction(signal, cp_df, st_groups, et_groups, offset_1, offset_2):
+def perform_extraction():
     """신호 추출 및 저장"""
+    
+    # 세션 상태에서 데이터 가져오기
+    signal = st.session_state.signal
+    cp_df = st.session_state.cp_df
+    st_groups = st.session_state.st_groups
+    et_groups = st.session_state.et_groups
+    offset_1 = st.session_state.offset_1
+    offset_2 = st.session_state.offset_2
     
     if len(st_groups) == 0 or len(et_groups) == 0:
         st.warning("시작 또는 종료 그룹이 비어 있어 추출할 수 없습니다.")
@@ -515,7 +612,7 @@ def perform_extraction(signal, cp_df, st_groups, et_groups, offset_1, offset_2):
     st.success("✅ 추출 및 시각화 실행 중...")
     pairs = []
     for st_grp, et_grp in zip(st_groups, et_groups):
-        st_pt = max(0, st_grp[0] - offset_1)
+        st_pt = max(0, st_grp[0] - offset_1 + len(st_grp)//2)  ###### Kang
         et_pt = min(len(signal), et_grp[0] + offset_2)
         if st_pt < et_pt:
             pairs.append((st_pt, et_pt))
@@ -549,18 +646,18 @@ def perform_extraction(signal, cp_df, st_groups, et_groups, offset_1, offset_2):
         crop_df.to_feather(save_path)
 
         # 5. crop 시각화 (특징 하나만 간단히 예시)
-        if i < 5:  # 처음 5개만 시각화
-            fig_crop, ax_crop = plt.subplots(figsize=(8, 3))
-            ax_crop.plot(signal[st_pt:et_pt])   
-            ax_crop.set_title(f"추출 신호 {i} (len={len(crop_df)})")
-            st.pyplot(fig_crop)
-            plt.close(fig_crop)
+        # if i < 5:  # 처음 5개만 시각화
+        fig_crop, ax_crop = plt.subplots(figsize=(8, 3))
+        ax_crop.plot(signal[st_pt:et_pt])   
+        ax_crop.set_title(f"추출 신호 {i} (len={len(crop_df)})")
+        st.pyplot(fig_crop)
+        plt.close(fig_crop)
 
         # 진행률 업데이트
         progress_bar.progress((i + 1) / len(pairs))
         
-        if i < 5:  # 처음 5개만 표시
-            st.info(f"✅ Saved: {save_path}")
+        # if i < 5:  # 처음 5개만 표시
+        st.info(f"✅ Saved: {save_path}")
 
     st.success("🎉 모든 구간 추출 완료!")
 
@@ -596,10 +693,57 @@ def file_download_tab():
             # 전체 파일 ZIP으로 다운로드 옵션
             create_download_link_for_all_files(feather_files)
 
+
+    # 프로그램 기능 설명
+    st.markdown("<br><br>", unsafe_allow_html=True)
+    st.markdown("---")
+    st.header("📋 프로그램 기능 안내")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.subheader("🔍 주요 기능")
+        st.markdown("""
+        **Tab 1: 신호 매칭 및 추출**
+        - Feather 파일 업로드 및 신호 컬럼 선택
+        - 기동 시작/종료 템플릿 매칭 (.npy 파일)
+        - 정규화된 교차 상관(NCC) 기반 패턴 탐지
+        - 매칭 임계값 및 신호 범위 설정
+        - 연속 구간 그룹화 및 오프셋 조정
+        
+        **Tab 2: 파일 다운로드**
+        - 추출된 Feather 파일 관리
+        - 전체 파일 ZIP 압축 다운로드
+        - 파일 크기 및 정보 확인
+        """)
+    
+    with col2:
+        st.subheader("⚙️ 분석 도구")
+        st.markdown("""
+        **신호 전처리**
+        - NaN/Inf 값 자동 처리 및 보간
+        - 신호 다운샘플링 표시
+        - 사용자 정의 샘플링 비율 설정
+        - 연속값 그룹화를 위한 최대 차이값 조정
+        
+        **시각화 기능**
+        - Plotly 기반 인터랙티브 시각화
+        - 매칭 위치 수직선 및 레이블 표시
+        - 실시간 샘플링 비율 조정
+        - 추출된 신호 구간별 개별 플롯
+        """)
+    
+    st.markdown("---")
+    st.info("💡 **사용 팁**: 먼저 기동 시작/종료 템플릿을 업로드하고, Feather 파일에서 매칭할 신호를 선택한 후 매칭 수행 → 신호 추출 순서로 진행하세요.")
+    
+    st.markdown("""
+    <div style='text-align: center; color: #666; margin-top: 2rem;'>
+        <small>이 도구는 엔진 기동 신호 패턴을 탐지하고 해당 구간을 자동으로 추출하기 위해 설계되었습니다.</small>
+    </div>
+    """, unsafe_allow_html=True)    
+
 # =====================================
 # 앱 실행
 # =====================================
 if __name__ == "__main__":
     main()
-
-
