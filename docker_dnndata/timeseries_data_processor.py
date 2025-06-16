@@ -306,8 +306,14 @@ def tab_data_input():
                                 )
                                 st.plotly_chart(fig_output, use_container_width=True)
 
+
+
+
 def tab_normalization():
-    """탭2: 정규화"""
+    """탭2: 데이터 정규화 - 특징 매칭 기능 포함"""
+    import pandas as pd  # pandas import 추가
+    import json  # json import 추가
+    
     st.header("📏 데이터 정규화")
     
     if st.session_state.dataset is None:
@@ -319,179 +325,374 @@ def tab_normalization():
     
     st.markdown("Min-Max 정규화를 통해 모든 특징을 [0, 1] 범위로 정규화합니다.")
     
-    # 정규화 파라미터 계산 또는 로드
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown("**정규화 파라미터 설정 방법:**")
-        param_source = st.radio(
-            "파라미터 소스 선택",
-            ["데이터에서 자동 계산", "파일에서 로드"],
-            key="param_source_method"
-        )
-    
-    with col2:
-        if param_source == "파일에서 로드":
-            uploaded_param_file = st.file_uploader(
-                "파라미터 파일 업로드",
-                type=['json'],
-                help="이전에 저장한 정규화 파라미터 JSON 파일을 업로드하세요.",
-                key="param_file_upload"
-            )
-    
-    # 파라미터 계산 또는 로드 실행
-    if param_source == "데이터에서 자동 계산":
-        if st.button("🔢 정규화 파라미터 계산", key="calc_norm_params"):
-            with st.spinner("정규화 파라미터 계산 중..."):
-                norm_params = calculate_normalization_params(dataset['train_inputs'])
-                st.session_state.normalization_params = norm_params
-                st.success("✅ 정규화 파라미터가 계산되었습니다!")
-    
-    elif param_source == "파일에서 로드":
-        if uploaded_param_file is not None:
-            if st.button("📁 파라미터 파일 로드", key="load_norm_params"):
-                try:
-                    with st.spinner("파라미터 파일 로딩 중..."):
-                        param_data = json.load(uploaded_param_file)
-                        
-                        # 파라미터 형식 검증
-                        if 'normalization_params' in param_data:
-                            loaded_params = param_data['normalization_params']
-                            
-                            # 키를 정수로 변환 (JSON에서는 문자열로 저장됨)
-                            norm_params = {}
-                            for key, value in loaded_params.items():
-                                norm_params[int(key)] = value
-                            
-                            st.session_state.normalization_params = norm_params
-                            st.success("✅ 파라미터 파일이 로드되었습니다!")
-                            
-                            # 로드된 파라미터 정보 표시
-                            st.info(f"📊 로드된 특징 수: {len(norm_params)}개")
-                            
-                        else:
-                            st.error("❌ 올바른 파라미터 파일 형식이 아닙니다.")
+    # 정규화 파라미터 자동 계산
+    if st.session_state.normalization_params is None:
+        with st.spinner("정규화 파라미터 자동 계산 중..."):
+            norm_params = calculate_normalization_params(dataset['train_inputs'])
+            
+            # React 컴포넌트 로직을 따라 조정된 범위 계산
+            adjusted_params = {}
+            for i, params in norm_params.items():
+                feature_name = feature_names[i] if i < len(feature_names) else f'Feature_{i}'
+                current_min = params['min']
+                current_max = params['max']
                 
-                except Exception as e:
-                    st.error(f"❌ 파라미터 파일 로드 중 오류: {str(e)}")
+                # 조정된 범위 계산 (React 컴포넌트 로직 적용)
+                adjusted_min, adjusted_max = calculate_adjusted_range(feature_name, current_min, current_max)
+                
+                adjusted_params[i] = {
+                    'min': adjusted_min,
+                    'max': adjusted_max,
+                    'range': adjusted_max - adjusted_min,
+                    'original_min': current_min,
+                    'original_max': current_max,
+                    'source': 'auto_calculated'  # 자동 계산된 파라미터 표시
+                }
+            
+            st.session_state.normalization_params = adjusted_params
+            st.success("✅ 정규화 파라미터가 자동으로 계산되었습니다!")
     
-    # 정규화 파라미터 표시 및 수정
+    # 정규화 파라미터 표시 및 편집 인터페이스
     if st.session_state.normalization_params is not None:
-        st.subheader("📊 정규화 파라미터")
+        st.subheader("📊 Min-Max 정규화 범위 계산기")
+        st.markdown("다변량 시계열 데이터의 정규화를 위한 최소/최대값을 계산하고 조정합니다.")
         
         norm_params = st.session_state.normalization_params.copy()
         
-        # 파라미터 표시 및 수정 인터페이스
-        with st.expander("✏️ 정규화 파라미터 확인 및 수정"):
-            st.markdown("각 특징의 Min/Max 값을 확인하고 필요시 수정할 수 있습니다.")
+        # 컨트롤 버튼들
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("📁 JSON 다운로드", key="download_json"):
+                # JSON 형식으로 파라미터 준비
+                json_data = {}
+                for i, params in norm_params.items():
+                    feature_name = feature_names[i] if i < len(feature_names) else f'Feature_{i}'
+                    json_data[feature_name] = {
+                        'min': params['min'],
+                        'max': params['max']
+                    }
+                
+                json_str = json.dumps(json_data, indent=2, ensure_ascii=False)
+                st.download_button(
+                    label="💾 JSON 파일 다운로드",
+                    data=json_str,
+                    file_name="minmax_ranges.json",
+                    mime="application/json"
+                )
+        
+        with col2:
+            if st.button("📊 CSV 다운로드", key="download_csv"):
+                # CSV 형식으로 파라미터 준비
+                csv_data = "feature_name,min_value,max_value\n"
+                for i, params in norm_params.items():
+                    feature_name = feature_names[i] if i < len(feature_names) else f'Feature_{i}'
+                    csv_data += f"{feature_name},{params['min']},{params['max']}\n"
+                
+                st.download_button(
+                    label="💾 CSV 파일 다운로드",
+                    data=csv_data,
+                    file_name="minmax_ranges.csv",
+                    mime="text/csv"
+                )
+        
+        with col3:
+            uploaded_param_file = st.file_uploader(
+                "📁 파일 업로드",
+                type=['json', 'csv'],
+                help="이전에 저장한 정규화 파라미터 파일을 업로드하세요.",
+                key="param_file_upload"
+            )
+        
+        # 파일 업로드 처리 (특징 매칭 기능 포함)
+        if uploaded_param_file is not None:
+            try:
+                uploaded_params = {}
+                uploaded_feature_names = []
+                
+                if uploaded_param_file.name.endswith('.json'):
+                    param_data = json.load(uploaded_param_file)
+                    uploaded_feature_names = list(param_data.keys())
+                    
+                elif uploaded_param_file.name.endswith('.csv'):
+                    param_df = pd.read_csv(uploaded_param_file)
+                    uploaded_feature_names = param_df['feature_name'].tolist()
+                    param_data = {}
+                    for _, row in param_df.iterrows():
+                        param_data[row['feature_name']] = {
+                            'min': row['min_value'],
+                            'max': row['max_value']
+                        }
+                
+                # 특징 매칭 분석
+                current_features = set(feature_names)
+                uploaded_features = set(uploaded_feature_names)
+                
+                matched_features = current_features & uploaded_features
+                current_only_features = current_features - uploaded_features
+                uploaded_only_features = uploaded_features - current_features
+                
+                # 매칭 결과 표시
+                st.markdown("---")
+                st.subheader("🔍 특징 매칭 분석")
+                
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("✅ 매칭된 특징", len(matched_features))
+                    if matched_features:
+                        with st.expander("매칭된 특징 목록"):
+                            for feature in sorted(matched_features):
+                                st.write(f"• {feature}")
+                
+                with col2:
+                    st.metric("🆕 현재 데이터만 있는 특징", len(current_only_features))
+                    if current_only_features:
+                        with st.expander("새로운 특징 목록"):
+                            for feature in sorted(current_only_features):
+                                st.write(f"• {feature}")
+                
+                with col3:
+                    st.metric("🗑️ 파일에만 있는 특징", len(uploaded_only_features))
+                    if uploaded_only_features:
+                        with st.expander("제거될 특징 목록"):
+                            for feature in sorted(uploaded_only_features):
+                                st.write(f"• {feature}")
+                
+                # 매칭 처리 옵션
+                st.markdown("**매칭 처리 방법:**")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    merge_strategy = st.radio(
+                        "매칭 전략 선택",
+                        [
+                            "자동 병합 (매칭된 특징만 사용)",
+                            "선택적 병합 (사용자가 선택)",
+                            "취소 (업로드 취소)"
+                        ],
+                        key="merge_strategy"
+                    )
+                
+                with col2:
+                    if merge_strategy != "취소 (업로드 취소)":
+                        if st.button("🔄 특징 매칭 적용", key="apply_feature_matching"):
+                            # 매칭 적용 로직
+                            new_params = apply_feature_matching(
+                                norm_params, param_data, feature_names, merge_strategy
+                            )
+                            
+                            if new_params:
+                                st.session_state.normalization_params = new_params
+                                st.success("✅ 특징 매칭이 완료되었습니다!")
+                                st.rerun()
+                            else:
+                                st.error("❌ 특징 매칭 중 오류가 발생했습니다.")
+                
+                # 선택적 병합인 경우 추가 옵션
+                if merge_strategy == "선택적 병합 (사용자가 선택)":
+                    st.markdown("**매칭된 특징별 사용 여부 선택:**")
+                    
+                    if matched_features:
+                        selected_features = st.multiselect(
+                            "업로드된 파일에서 사용할 특징 선택",
+                            sorted(matched_features),
+                            default=sorted(matched_features),
+                            key="selective_features"
+                        )
+                        
+                        st.info(f"선택된 특징: {len(selected_features)}개, 자동 계산 특징: {len(current_only_features)}개")
             
-            param_data = []
-            for i, params in norm_params.items():
-                param_data.append({
-                    '특징 인덱스': i,
-                    '특징명': feature_names[i] if i < len(feature_names) else f'Feature_{i}',
-                    '최솟값': params['min'],
-                    '최댓값': params['max'],
-                    '범위': params['range']
-                })
+            except Exception as e:
+                st.error(f"❌ 파일 업로드 중 오류: {str(e)}")
+        
+        # 전체 파라미터 테이블 표시
+        st.subheader("📋 전체 정규화 파라미터")
+        
+        # DataFrame으로 표시 (출처 정보 포함) - 선택 가능한 테이블
+        display_data = []
+        for i, params in norm_params.items():
+            feature_name = feature_names[i] if i < len(feature_names) else f'Feature_{i}'
+            source = params.get('source', 'auto_calculated')
+            source_icon = {
+                'auto_calculated': '🔢',
+                'uploaded': '🔄',
+                'manually_edited': '✏️'
+            }.get(source, '❓')
             
-            param_df = pd.DataFrame(param_data)
-            st.dataframe(param_df, use_container_width=True, hide_index=True)
+            display_data.append({
+                'index': i,  # 인덱스 추가
+                '특징명': f"{source_icon} {feature_name}",
+                '현재 최소값': f"{params['original_min']:.4f}",
+                '현재 최대값': f"{params['original_max']:.4f}",
+                '조정된 최소값': f"{params['min']:.4f}",
+                '조정된 최대값': f"{params['max']:.4f}",
+                '범위': f"{params['range']:.4f}",
+                '출처': {
+                    'auto_calculated': '자동계산',
+                    'uploaded': '업로드',
+                    'manually_edited': '수동편집'
+                }.get(source, '알 수 없음')
+            })
+        
+        param_df = pd.DataFrame(display_data)
+        
+        # 색상을 사용한 강조 표시를 위해 스타일링 적용
+        def highlight_by_source(row):
+            styles = [''] * len(row)
+            if '🔄' in row['특징명']:  # 업로드된 특징
+                styles = ['background-color: #e8f5e8; color: #2e7d32'] * len(row)
+            elif '✏️' in row['특징명']:  # 수동 편집된 특징
+                styles = ['background-color: #fff3e0; color: #f57c00'] * len(row)
             
-            # 수정 인터페이스
-            st.markdown("**파라미터 수정:**")
+            # 조정된 값들을 강조
+            styles[4] = styles[4] + '; font-weight: bold'  # 조정된 최소값 (index 고려)
+            styles[5] = styles[5] + '; font-weight: bold'  # 조정된 최대값 (index 고려)
+            return styles
+        
+        # index 컬럼 숨기고 선택 가능한 테이블로 표시
+        styled_df = param_df.style.apply(highlight_by_source, axis=1)
+        
+        # 선택 가능한 데이터프레임 표시
+        event = st.dataframe(
+            styled_df,
+            use_container_width=True, 
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="param_table_selection"
+        )
+        
+        # 범례
+        st.markdown("""
+        **범례:** 🔢 자동계산 | 🔄 파일업로드 | ✏️ 수동편집  
+        **사용법:** 테이블에서 행을 클릭하여 편집할 특징을 선택하세요.
+        """)
+        
+        # 테이블에서 선택된 행 확인
+        selected_row_idx = None
+        if event.selection.rows:
+            selected_row_idx = event.selection.rows[0]
+        
+        # 테이블에서 선택된 행 기반 편집 인터페이스
+        st.markdown("---")
+        st.subheader("🔧 정규화 파라미터 편집")
+        
+        if selected_row_idx is not None:
+            # 선택된 행의 실제 특징 인덱스 가져오기
+            edit_feature_idx = param_df.iloc[selected_row_idx]['index']
+            selected_feature_name = param_df.iloc[selected_row_idx]['특징명']
+            
+            col1, col2 = st.columns([2, 1])
+            
+            with col1:
+                st.markdown(f"**선택된 특징:** {selected_feature_name}")
+                st.info("💡 테이블에서 다른 행을 클릭하여 편집할 특징을 변경할 수 있습니다.")
+            
+            with col2:
+                st.markdown("**선택된 특징 정보**")
+                current_params = norm_params[edit_feature_idx]
+                source = current_params.get('source', 'auto_calculated')
+                source_text = {
+                    'auto_calculated': '자동계산',
+                    'uploaded': '업로드됨',
+                    'manually_edited': '수동편집'
+                }.get(source, '알 수 없음')
+                
+                st.write(f"출처: {source_text}")
+                st.write(f"현재 최소값: {current_params['original_min']:.4f}")
+                st.write(f"현재 최대값: {current_params['original_max']:.4f}")
+            
+            # 편집 인터페이스
+            current_params = norm_params[edit_feature_idx]
+            
             col1, col2, col3 = st.columns(3)
             
             with col1:
-                modify_feature = st.selectbox(
-                    "수정할 특징 선택",
-                    range(len(feature_names)),
-                    format_func=lambda x: f"{x}: {feature_names[x]}",
-                    key="modify_feature_select"
+                new_min = st.number_input(
+                    "조정된 최소값",
+                    value=float(current_params['min']),
+                    format="%.6f",
+                    key=f"edit_min_value_{edit_feature_idx}"  # 고유 키 사용
                 )
             
             with col2:
-                current_min = norm_params[modify_feature]['min']
-                new_min = st.number_input(
-                    "새로운 최솟값",
-                    value=current_min,
-                    key="new_min_value"
+                new_max = st.number_input(
+                    "조정된 최대값",
+                    value=float(current_params['max']),
+                    format="%.6f",
+                    key=f"edit_max_value_{edit_feature_idx}"  # 고유 키 사용
                 )
             
             with col3:
-                current_max = norm_params[modify_feature]['max']
-                new_max = st.number_input(
-                    "새로운 최댓값",
-                    value=current_max,
-                    key="new_max_value"
-                )
+                st.markdown("**편집 동작**")
+                if st.button("✅ 업데이트", key=f"update_feature_params_{edit_feature_idx}"):
+                    if new_max > new_min:
+                        norm_params[edit_feature_idx]['min'] = new_min
+                        norm_params[edit_feature_idx]['max'] = new_max
+                        norm_params[edit_feature_idx]['range'] = new_max - new_min
+                        norm_params[edit_feature_idx]['source'] = 'manually_edited'
+                        st.session_state.normalization_params = norm_params
+                        feature_name = feature_names[edit_feature_idx] if edit_feature_idx < len(feature_names) else f'Feature_{edit_feature_idx}'
+                        st.success(f"✅ {feature_name} 특징의 파라미터가 업데이트되었습니다!")
+                        st.rerun()
+                    else:
+                        st.error("❌ 최댓값은 최솟값보다 커야 합니다.")
+        
+        else:
+            st.info("📝 위의 테이블에서 편집할 특징을 선택해주세요.")
+        
+        # 계산 규칙 설명
+        with st.expander("📐 조정된 범위 계산 규칙 및 특징 매칭"):
+            col1, col2 = st.columns(2)
             
-            if st.button("📝 파라미터 업데이트", key="update_params"):
-                if new_max > new_min:
-                    norm_params[modify_feature]['min'] = new_min
-                    norm_params[modify_feature]['max'] = new_max
-                    norm_params[modify_feature]['range'] = new_max - new_min
-                    st.session_state.normalization_params = norm_params
-                    st.success(f"✅ {feature_names[modify_feature]} 특징의 파라미터가 업데이트되었습니다!")
-                    st.rerun()
-                else:
-                    st.error("❌ 최댓값은 최솟값보다 커야 합니다.")
-        
-        # 정규화 파라미터 저장 옵션
-        st.markdown("---")
-        st.subheader("💾 정규화 파라미터 저장")
-        
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            param_filename = st.text_input(
-                "저장할 파일명",
-                value="normalization_params",
-                key="param_save_filename"
-            )
-        
-        with col2:
-            if st.button("💾 파라미터 저장", key="save_norm_params"):
-                try:
-                    # 파라미터를 JSON 형식으로 준비
-                    save_data = {
-                        'normalization_params': st.session_state.normalization_params,
-                        'feature_names': feature_names,
-                        'creation_time': datetime.now().isoformat(),
-                        'total_features': len(feature_names),
-                        'data_info': {
-                            'train_samples': len(dataset['train_inputs']),
-                            'input_shape': list(dataset['train_inputs'].shape),
-                            'description': 'Min-Max normalization parameters'
-                        }
-                    }
-                    
-                    # JSON 문자열로 변환
-                    json_str = json.dumps(save_data, indent=2, ensure_ascii=False)
-                    
-                    st.download_button(
-                        label="📁 파라미터 파일 다운로드",
-                        data=json_str,
-                        file_name=f"{param_filename}.json",
-                        mime="application/json",
-                        help="정규화 파라미터를 JSON 파일로 다운로드합니다."
-                    )
-                    
-                    st.success("✅ 파라미터 파일이 준비되었습니다!")
-                    
-                except Exception as e:
-                    st.error(f"❌ 파라미터 저장 중 오류: {str(e)}")
-        
-        # 저장된 파라미터 미리보기
-        with st.expander("👀 저장될 파라미터 미리보기"):
-            preview_data = {
-                'normalization_params': st.session_state.normalization_params,
-                'feature_names': feature_names[:5] + (['...'] if len(feature_names) > 5 else []),  # 처음 5개만 표시
-                'total_features': len(feature_names)
-            }
-            st.json(preview_data)
+            with col1:
+                st.markdown("""
+                **자동 계산 규칙:**
+                
+                - **최소값 처리:**
+                    - 현재 최소값이 0이면 그대로 0으로 유지
+                    - 양수 최소값은 0으로 설정
+                    - 음수 최소값은 20% 확장하여 반올림
+                
+                - **최대값 처리 (범위별):**
+                    - 1 이하: 20% 확장 후 소수점 1자리까지
+                    - 10 미만: 정수로 반올림
+                    - 100 미만: 10 단위로 반올림
+                    - 1000 미만: 50 단위로 반올림  
+                    - 10000 미만: 100 단위로 반올림
+                    - 그 이상: 더 큰 단위로 반올림
+                
+                - **특별 처리:**
+                    - 외기온도(embient_temp): 최소 -10, 최대 35로 고정
+                """)
+            
+            with col2:
+                st.markdown("""
+                **특징 매칭 기능:**
+                
+                - **매칭된 특징:** 🔄
+                    - 현재 데이터와 업로드 파일 모두에 존재
+                    - 업로드된 파라미터 값 사용
+                
+                - **새로운 특징:** 🔢
+                    - 현재 데이터에만 존재 (업로드 파일에 없음)
+                    - 자동 계산된 파라미터 값 사용
+                
+                - **제거된 특징:**
+                    - 업로드 파일에만 존재 (현재 데이터에 없음)
+                    - 테이블에서 자동 제거
+                
+                **편집 기능:**
+                - 각 특징별로 개별 조정 가능
+                - 실시간 업데이트 및 미리보기
+                - 파일 업로드/다운로드 지원
+                """)
         
         # 정규화 적용
-        if st.button("🎯 정규화 적용", key="apply_normalization"):
+        st.markdown("---")
+        if st.button("🎯 정규화 적용", key="apply_normalization", type="primary"):
             with st.spinner("정규화 적용 중..."):
                 normalized_dataset = {}
                 
@@ -520,6 +721,7 @@ def tab_normalization():
         
         # 정규화 결과 확인
         if st.session_state.normalized_dataset is not None:
+            st.markdown("---")
             st.subheader("📈 정규화 결과 확인")
             
             normalized_dataset = st.session_state.normalized_dataset
@@ -538,7 +740,7 @@ def tab_normalization():
                 feature_to_compare = st.selectbox(
                     "비교할 특징 선택",
                     range(len(feature_names)),
-                    format_func=lambda x: f"{x}: {feature_names[x]}",
+                    format_func=lambda x: f"{feature_names[x]}",
                     key="norm_compare_feature"
                 )
             
@@ -547,7 +749,7 @@ def tab_normalization():
                     "분석할 샘플 수",
                     min_value=10,
                     max_value=min(100000, len(normalized_dataset[data_type])),
-                    value=min(100, len(normalized_dataset[data_type])),
+                    value=min(1000, len(normalized_dataset[data_type])),
                     key="norm_sample_count"
                 )
             
@@ -652,22 +854,82 @@ def tab_normalization():
             
             validation_df = pd.DataFrame(validation_results)
             st.dataframe(validation_df, use_container_width=True, hide_index=True)
-            
-            # 정규화 파라미터 확인
-            with st.expander("📊 적용된 정규화 파라미터"):
-                if st.session_state.normalization_params:
-                    param_list = []
-                    for i, params in st.session_state.normalization_params.items():
-                        param_list.append({
-                            '특징 인덱스': i,
-                            '특징명': feature_names[i] if i < len(feature_names) else f'Feature_{i}',
-                            '최솟값': f"{params['min']:.6f}",
-                            '최댓값': f"{params['max']:.6f}",
-                            '범위': f"{params['range']:.6f}"
-                        })
-                    
-                    param_df = pd.DataFrame(param_list)
-                    st.dataframe(param_df, use_container_width=True, hide_index=True)
+
+
+def apply_feature_matching(norm_params, uploaded_param_data, feature_names, merge_strategy):
+    """특징 매칭을 적용하여 새로운 정규화 파라미터 생성"""
+    try:
+        new_params = {}
+        
+        # 현재 특징들과 업로드된 특징들 분석
+        current_features = set(feature_names)
+        uploaded_features = set(uploaded_param_data.keys())
+        matched_features = current_features & uploaded_features
+        current_only_features = current_features - uploaded_features
+        
+        # 각 현재 특징에 대해 처리
+        for i, feature_name in enumerate(feature_names):
+            if feature_name in matched_features:
+                # 매칭된 특징: 업로드된 파라미터 사용
+                uploaded_values = uploaded_param_data[feature_name]
+                new_params[i] = {
+                    'min': uploaded_values['min'],
+                    'max': uploaded_values['max'],
+                    'range': uploaded_values['max'] - uploaded_values['min'],
+                    'original_min': norm_params[i]['original_min'],
+                    'original_max': norm_params[i]['original_max'],
+                    'source': 'uploaded'
+                }
+            else:
+                # 현재 데이터에만 있는 특징: 기존 자동 계산된 파라미터 유지
+                new_params[i] = norm_params[i].copy()
+                new_params[i]['source'] = 'auto_calculated'
+        
+        return new_params
+        
+    except Exception as e:
+        st.error(f"특징 매칭 중 오류: {str(e)}")
+        return None
+
+
+def calculate_adjusted_range(feature_name, current_min, current_max):
+    """React 컴포넌트의 계산 로직을 Python으로 변환"""
+    
+    # 외기온도 특별 처리
+    if 'embient_temp' in feature_name.lower() or 'ambient_temp' in feature_name.lower():
+        return -10, 35
+    
+    # 최소값 처리: 0이면 그대로 0, 아니면 음수로 확장
+    if current_min == 0:
+        adjusted_min = 0
+    elif current_min > 0:
+        adjusted_min = 0  # 양수 최소값은 0으로 설정
+    else:
+        # 음수인 경우 적절한 범위로 확장
+        adjusted_min = np.floor(current_min * 1.2)
+    
+    # 최대값 처리
+    if current_max <= 1:
+        adjusted_max = np.ceil(current_max * 1.2 * 10) / 10  # 소수점 1자리까지
+    elif current_max < 10:
+        adjusted_max = np.ceil(current_max)
+    elif current_max < 100:
+        adjusted_max = np.ceil(current_max / 10) * 10
+    elif current_max < 1000:
+        adjusted_max = np.ceil(current_max / 50) * 50
+    elif current_max < 10000:
+        adjusted_max = np.ceil(current_max / 100) * 100
+    elif current_max < 100000:
+        adjusted_max = np.ceil(current_max / 1000) * 1000
+    else:
+        adjusted_max = np.ceil(current_max / 10000) * 10000
+    
+    return adjusted_min, adjusted_max
+
+
+
+
+
 
 def tab_feature_shift():
     """탭3: 특징 시프트"""
