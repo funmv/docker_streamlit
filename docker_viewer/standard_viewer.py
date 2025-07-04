@@ -1,5 +1,3 @@
-
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -11,7 +9,6 @@ import os
 import re
 from datetime import datetime
 import tempfile
-# import shutil
 
 # 한글 폰트 설정
 try:
@@ -55,6 +52,34 @@ if 'color_mapping' not in st.session_state:
     st.session_state.color_mapping = {}
 if 'uploaded_files_data' not in st.session_state:
     st.session_state.uploaded_files_data = {}
+if 'selection_order' not in st.session_state:
+    st.session_state.selection_order = []
+if 'default_signals_applied' not in st.session_state:
+    st.session_state.default_signals_applied = False
+if 'reset_selections' not in st.session_state:
+    st.session_state.reset_selections = False
+if 'apply_defaults' not in st.session_state:
+    st.session_state.apply_defaults = False
+
+# 디폴트 신호 목록 정의
+DEFAULT_SIGNALS = [
+    "COP-A Running",
+    "COP-B Running", 
+    "GT5_Speed",
+    "GT6_Speed",
+    "GT5 발전기 Breaker Close",
+    "GT6 발전기 Breaker Close",
+    "ST Ready to Start",
+    "S3_L14HM",
+    "GT5 Load Setpoint 상승(출력증발)",
+    "GT6 Load Setpoint 상승(출력증발)",
+    "GT5 MW",
+    "GT6 MW",
+    "HRSG5 HP BYPASS Vv 개도",
+    "HRSG6 HP BYPASS Vv 개도",
+    "GT5 AGC On",
+    "GT6 AGC On"
+]
 
 def handle_file_upload(uploaded_files):
     """업로드된 파일들을 처리하는 함수"""
@@ -74,6 +99,7 @@ def handle_file_upload(uploaded_files):
         st.session_state.digital_signals = []
         st.session_state.analog_signals = []
         st.session_state.color_mapping = {}
+        st.session_state.selection_order = []
         
         st.success(f"{len(uploaded_files)}개 파일이 업로드되었습니다.")
         st.rerun()
@@ -310,10 +336,16 @@ def create_color_mapping(data_dict):
     
     return color_mapping
 
-def create_signal_plots(data_dict, signal_list, signal_type, sampling_method, max_points, color_mapping):
+def create_signal_plots(data_dict, signal_list, signal_type, sampling_method, max_points, color_mapping, preview_undersampling_level=3):
     """신호 플롯을 생성하는 함수"""
     plot_data = {}
     line_styles = ['-', '--', '-.', ':']
+    
+    # 사용자 설정에 따른 언더샘플링
+    if preview_undersampling_level == 0:
+        preview_max_points = max_points  # 언더샘플링 없음
+    else:
+        preview_max_points = max(50, max_points // preview_undersampling_level)  # 최소 50개 포인트 보장
     
     for signal in signal_list:
         # 기존 figure가 있다면 닫기
@@ -324,12 +356,17 @@ def create_signal_plots(data_dict, signal_list, signal_type, sampling_method, ma
         file_idx = 0
         for filename, df in data_dict.items():
             if signal in df.columns:
-                # 데이터 샘플링 적용
+                # 기본 샘플링 적용
                 sampled_df = sample_data(df, sampling_method, max_points)
+                
+                # 추가 언더샘플링 적용 (미리보기 성능 향상)
+                if preview_undersampling_level > 0 and len(sampled_df) > preview_max_points:
+                    step = max(1, len(sampled_df) // preview_max_points)
+                    sampled_df = sampled_df.iloc[::step]
                 
                 color = color_mapping[filename]['matplotlib']
                 linestyle = line_styles[file_idx % len(line_styles)]
-                linewidth = 1.2 + (file_idx % 3) * 0.2
+                linewidth = 1.0 + (file_idx % 3) * 0.15  # 선 두께 줄임
                 
                 ax.plot(sampled_df.index, sampled_df[signal], 
                        color=color, linestyle=linestyle, linewidth=linewidth,
@@ -347,16 +384,16 @@ def create_signal_plots(data_dict, signal_list, signal_type, sampling_method, ma
         
         # 타이틀을 플롯 내부 좌측 상단에 표시
         ax.text(0.02, 0.95, signal, transform=ax.transAxes, 
-                fontsize=6, fontweight='bold', verticalalignment='top',
-                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+                fontsize=5, fontweight='bold', verticalalignment='top',  # 폰트 크기 줄임
+                bbox=dict(boxstyle='round,pad=0.15', facecolor='white', alpha=0.9))  # 패딩 줄임
         
         # 범례를 플롯 내부 우측 하단에 표시
         if len(data_dict) > 1:  # 파일이 여러 개일 때만 범례 표시
-            ax.legend(loc='lower right', fontsize=5, framealpha=0.8)
+            ax.legend(loc='lower right', fontsize=4, framealpha=0.8)  # 범례 폰트도 줄임
         
         # Y축 라벨 제거하고 틱만 표시
-        ax.tick_params(labelsize=5, length=2)
-        ax.grid(True, alpha=0.15, linewidth=0.5)
+        ax.tick_params(labelsize=4, length=1.5)  # 틱 폰트와 길이 줄임
+        ax.grid(True, alpha=0.15, linewidth=0.3)  # 그리드 선 두께 줄임
         
         # 여백을 극도로 줄임
         plt.tight_layout(pad=0.1)
@@ -366,19 +403,131 @@ def create_signal_plots(data_dict, signal_list, signal_type, sampling_method, ma
     
     return plot_data
 
+def normalize_signal_name(signal_name):
+    """신호명을 정규화하는 함수 (공백, 언더스코어, 특수문자 제거, 영문만 소문자 변환)"""
+    import re
+    # 공백, 언더스코어, 하이픈, 괄호 등 제거
+    normalized = re.sub(r'[\s_\-\(\)]', '', signal_name)
+    # 영문자만 소문자로 변환 (한글은 그대로 유지)
+    result = ''
+    for char in normalized:
+        if char.isascii() and char.isalpha():
+            result += char.lower()
+        else:
+            result += char
+    return result
+
+def find_matching_signal(target_signal, available_signals):
+    """타겟 신호와 유사한 신호를 찾는 함수"""
+    target_normalized = normalize_signal_name(target_signal)
+    
+    # 1단계: 정확한 매칭 (정규화 후)
+    for signal in available_signals:
+        signal_normalized = normalize_signal_name(signal)
+        if target_normalized == signal_normalized:
+            return signal
+    
+    # 2단계: 부분 매칭 시도 (포함 관계)
+    for signal in available_signals:
+        signal_normalized = normalize_signal_name(signal)
+        if target_normalized in signal_normalized or signal_normalized in target_normalized:
+            return signal
+    
+    # 3단계: 더 관대한 매칭 (핵심 키워드 기반)
+    # 한글이 포함된 경우를 위한 추가 매칭
+    target_keywords = extract_keywords(target_signal)
+    for signal in available_signals:
+        signal_keywords = extract_keywords(signal)
+        if len(target_keywords) > 0 and len(signal_keywords) > 0:
+            # 키워드의 80% 이상이 일치하면 매칭으로 간주
+            common_keywords = set(target_keywords) & set(signal_keywords)
+            if len(common_keywords) >= max(1, len(target_keywords) * 0.8):
+                return signal
+    
+    return None
+
+def extract_keywords(signal_name):
+    """신호명에서 핵심 키워드를 추출하는 함수"""
+    import re
+    # 공백, 언더스코어, 하이픈 등으로 분리
+    parts = re.split(r'[\s_\-\(\)]+', signal_name)
+    keywords = []
+    for part in parts:
+        if len(part) > 0:
+            # 영문은 소문자로, 한글은 그대로
+            normalized_part = ''
+            for char in part:
+                if char.isascii() and char.isalpha():
+                    normalized_part += char.lower()
+                else:
+                    normalized_part += char
+            keywords.append(normalized_part)
+    return [k for k in keywords if len(k) > 0]
+
+def apply_default_signal_selection():
+    """디폴트 신호들을 자동으로 선택하는 함수"""
+    if st.session_state.default_signals_applied:
+        return
+    
+    # 모든 신호 목록 생성 (디지털 + 아날로그)
+    all_available_signals = st.session_state.digital_signals + st.session_state.analog_signals
+    
+    # 디폴트 신호 중 실제 존재하는 신호들만 선택 (유사 매칭 포함)
+    available_default_signals = []
+    for target_signal in DEFAULT_SIGNALS:
+        matched_signal = find_matching_signal(target_signal, all_available_signals)
+        if matched_signal:
+            available_default_signals.append(matched_signal)
+    
+    # 선택 순서 설정
+    st.session_state.selection_order = available_default_signals.copy()
+    
+    # 체크박스 상태 설정
+    for signal in available_default_signals:
+        if signal in st.session_state.digital_signals:
+            checkbox_key = f"digital_{signal}"
+        else:
+            checkbox_key = f"analog_{signal}"
+        
+        st.session_state[checkbox_key] = True
+    
+    # 디폴트 적용 완료 표시
+    st.session_state.default_signals_applied = True
+def update_selection_order(signal, is_selected):
+    """선택 순서를 업데이트하는 콜백 함수"""
+    if is_selected:  # 체크된 경우
+        if signal not in st.session_state.selection_order:
+            st.session_state.selection_order.append(signal)
+    else:  # 체크 해제된 경우
+        if signal in st.session_state.selection_order:
+            st.session_state.selection_order.remove(signal)
+
 def display_signal_plots_with_checkboxes(plot_data, signal_type):
     """플롯과 체크박스를 표시하는 함수 - 그리드 레이아웃으로 촘촘하게 배치"""
     checkbox_states = {}
     
-    # CSS로 플롯 간 간격 최소화
+    # CSS로 플롯 간 간격 최소화 - 더 강력한 스타일 적용
     st.markdown("""
     <style>
     .plot-container {
-        margin: -5px 0 !important;
+        margin: -20px 0 !important;
         padding: 0 !important;
     }
     .stCheckbox {
-        margin-top: 10px !important;
+        margin-top: 5px !important;
+    }
+    /* Streamlit 기본 요소들의 간격 조정 */
+    .element-container {
+        margin-bottom: -20px !important;
+    }
+    .stPlotlyChart, .stPyplot {
+        margin-bottom: -30px !important;
+        margin-top: -10px !important;
+    }
+    /* 컬럼 간격 조정 */
+    [data-testid="column"] {
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -400,7 +549,8 @@ def display_signal_plots_with_checkboxes(plot_data, signal_type):
             checkbox_states[signal1] = st.checkbox(
                 "✓", 
                 key=checkbox_key1,
-                help=f"Select {signal1}"
+                help=f"Select {signal1}",
+                on_change=lambda signal=signal1: update_selection_order(signal, st.session_state.get(checkbox_key1, False))
             )
         
         # 두 번째 신호 (있는 경우)
@@ -415,8 +565,12 @@ def display_signal_plots_with_checkboxes(plot_data, signal_type):
                 checkbox_states[signal2] = st.checkbox(
                     "✓", 
                     key=checkbox_key2,
-                    help=f"Select {signal2}"
+                    help=f"Select {signal2}",
+                    on_change=lambda signal=signal2: update_selection_order(signal, st.session_state.get(checkbox_key2, False))
                 )
+        
+        # 각 행 사이에 작은 간격 추가 (선택사항)
+        # st.markdown("<div style='margin: -15px 0;'></div>", unsafe_allow_html=True)
     
     # 메모리 정리
     for fig in plot_data.values():
@@ -425,74 +579,142 @@ def display_signal_plots_with_checkboxes(plot_data, signal_type):
     
     return checkbox_states
 
-def plot_selected_signals_plotly(data_dict, selected_signals, sampling_method, max_points, color_mapping):
-    """선택된 신호들을 plotly로 플롯하는 함수"""
+def plot_selected_signals_matplotlib(data_dict, selected_signals, sampling_method, max_points, color_mapping, undersampling_level=2):
+    """선택된 신호들을 matplotlib로 플롯하는 함수 (빠른 렌더링)"""
     if not selected_signals or not data_dict:
         st.warning("선택된 신호가 없습니다.")
         return
     
-    fig = make_subplots(
-        rows=len(selected_signals), cols=1,
-        subplot_titles=selected_signals,
-        shared_xaxes=True,
-        vertical_spacing=0.05
-    )
+    # 기존 figure들 모두 닫기
+    plt.close('all')
     
-    for row, signal in enumerate(selected_signals, 1):
+    # 고정된 높이로 서브플롯 생성 - 각 플롯박스 높이를 일정하게 유지
+    n_signals = len(selected_signals)
+    fixed_height_per_signal = 0.7  # 각 신호당 고정 높이
+    total_height = fixed_height_per_signal * n_signals
+    
+    fig, axes = plt.subplots(n_signals, 1, figsize=(12, total_height), sharex=True)
+    
+    # 단일 신호인 경우 axes를 리스트로 변환
+    if n_signals == 1:
+        axes = [axes]
+    
+    line_styles = ['-', '--', '-.', ':']
+    
+    # 언더샘플링 레벨에 따른 최대 포인트 계산
+    if undersampling_level == 0:
+        fast_max_points = max_points  # 언더샘플링 없음
+    else:
+        fast_max_points = max(50, max_points // undersampling_level)  # 최소 50개 포인트 보장
+    
+    for idx, signal in enumerate(selected_signals):
+        ax = axes[idx]
+        file_idx = 0
+        
         for filename, df in data_dict.items():
             if signal in df.columns:
-                # 데이터 샘플링 적용
+                # 기본 샘플링 적용
                 sampled_df = sample_data(df, sampling_method, max_points)
                 
-                # 색상 매핑에서 plotly 색상 사용
-                color = color_mapping[filename]['plotly']
+                # 추가 언더샘플링 적용 (플롯 성능 향상)
+                if undersampling_level > 0 and len(sampled_df) > fast_max_points:
+                    step = max(1, len(sampled_df) // fast_max_points)
+                    sampled_df = sampled_df.iloc[::step]
                 
-                fig.add_trace(
-                    go.Scatter(
-                        x=sampled_df.index,
-                        y=sampled_df[signal],
-                        name=f"{filename} - {signal}",
-                        line=dict(color=color, width=2),
-                        hoverinfo='skip'  # 호버 정보는 건너뛰지만 스파이크는 활성화
-                    ),
-                    row=row, col=1
-                )
+                color = color_mapping[filename]['matplotlib']
+                linestyle = line_styles[file_idx % len(line_styles)]
+                linewidth = 1.2 + (file_idx % 3) * 0.2  # 선 두께도 줄임
+                
+                ax.plot(sampled_df.index, sampled_df[signal], 
+                       color=color, linestyle=linestyle, linewidth=linewidth,
+                       label=f"{filename}", alpha=0.8)
+                file_idx += 1
+        
+        # 플롯박스 경계선 두께 줄이기
+        for spine in ax.spines.values():
+            spine.set_linewidth(0.5)  # 경계선 두께를 0.5로 설정
+        
+        # 특징명을 각 플롯박스 내부 좌측 끝 상부에 위치
+        ax.text(0.01, 0.95, signal, transform=ax.transAxes, 
+                fontsize=8, fontweight='bold',  # 폰트 크기 약간 증가
+                verticalalignment='top', horizontalalignment='left',
+                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.9, linewidth=0.5))
+        
+        ax.grid(True, alpha=0.3)
+        
+        # 틱 설정 - X축과 Y축 모두 라벨 표시, 폰트 크기 줄임
+        ax.tick_params(labelsize=7, length=2)  # 라벨 크기를 7로 증가
+        
+        # Y축 틱 개수 제한
+        ax.locator_params(axis='y', nbins=4)
+        
+        # 범례는 첫 번째 플롯에만 표시
+        if idx == 0 and len(data_dict) > 1:
+            ax.legend(loc='upper right', fontsize=7, framealpha=0.9)  # 범례 폰트도 증가
+        
+        # Y축 범위 조정
+        try:
+            y_min, y_max = ax.get_ylim()
+            y_range = y_max - y_min
+            if y_range > 0:
+                ax.set_ylim(y_min - y_range * 0.05, y_max + y_range * 0.05)
+        except:
+            pass
     
-    fig.update_layout(
-        height=250 * len(selected_signals),
-        title="Selected Signals Analysis",
-        hovermode='x',  # x축 기준 호버모드로 변경하여 스파이크 라인 활성화
-        showlegend=True
-    )
+    # X축 틱 개수 제한 및 라벨 표시
+    axes[-1].locator_params(axis='x', nbins=8)  # X축 틱을 8개 정도로 제한
+    axes[-1].set_xlabel('Time Index', fontsize=9)  # X축 라벨 폰트 크기 증가
     
-    # 전체 레이아웃에서 스파이크 설정
-    fig.update_layout(
-        hoverdistance=100,  # 호버 감지 거리 증가
-        spikedistance=1000  # 스파이크 감지 거리 증가
-    )
+    # 전체 제목 - 언더샘플링 정보 포함
+    sampling_info = f"(언더샘플링 레벨: {undersampling_level})" if undersampling_level > 0 else "(원본 데이터)"
+    fig.suptitle(f'선택된 신호 통합 분석 {sampling_info}', fontsize=13, fontweight='bold', y=0.98)
     
-    # 각 subplot에 대해 세로 스파이크 설정 적용
-    for i in range(1, len(selected_signals) + 1):
-        fig.update_xaxes(
-            showspikes=True,
-            spikecolor="gray",
-            spikesnap="cursor",
-            spikemode="across",
-            spikethickness=1,
-            spikedash="solid",
-            row=i, col=1
-        )
-        # Y축 스파이크는 제거
-        fig.update_yaxes(
-            showspikes=False,
-            row=i, col=1
-        )
+    # 레이아웃 조정 - 고정 높이에 맞춰 간격 조정
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.subplots_adjust(hspace=0.2)  # 세로 간격을 약간 늘림 (고정 높이에 맞춰)
     
-    st.plotly_chart(fig, use_container_width=True)
+    # Streamlit에 표시
+    st.pyplot(fig, use_container_width=True)
+    
+    # 메모리 정리
+    plt.close(fig)
 
 def main():
     st.title("🔍 다변량 시계열 데이터 분석 도구")
     st.markdown("---")
+    
+    # 선택 초기화 처리 (위젯 생성 전에 실행)
+    if st.session_state.reset_selections:
+        # 모든 체크박스를 False로 설정 (키 삭제하지 않음)
+        all_signals = st.session_state.digital_signals + st.session_state.analog_signals
+        for signal in all_signals:
+            digital_key = f"digital_{signal}"
+            analog_key = f"analog_{signal}"
+            # 기존 키가 있으면 False로 설정, 없으면 새로 생성
+            st.session_state[digital_key] = False
+            st.session_state[analog_key] = False
+        
+        st.session_state.selection_order = []
+        st.session_state.reset_selections = False
+        st.rerun()
+    
+    # 디폴트 선택 적용 처리 (위젯 생성 전에 실행)
+    if st.session_state.apply_defaults:
+        # 기존 선택 모두 False로 설정
+        all_signals = st.session_state.digital_signals + st.session_state.analog_signals
+        for signal in all_signals:
+            digital_key = f"digital_{signal}"
+            analog_key = f"analog_{signal}"
+            st.session_state[digital_key] = False
+            st.session_state[analog_key] = False
+        
+        # 디폴트 신호 선택 적용
+        st.session_state.default_signals_applied = False
+        if st.session_state.digital_signals or st.session_state.analog_signals:
+            apply_default_signal_selection()
+        
+        st.session_state.apply_defaults = False
+        st.rerun()
     
     # 1단계: 데이터 입력 방법 선택
     st.header("1단계: 데이터 입력 방법 선택")
@@ -530,6 +752,7 @@ def main():
             st.session_state.digital_signals = []
             st.session_state.analog_signals = []
             st.session_state.color_mapping = {}
+            st.session_state.selection_order = []
     
     # 데이터 처리 부분
     if st.session_state.folder_path and os.path.exists(st.session_state.folder_path):
@@ -615,9 +838,17 @@ def main():
                         
                         st.session_state.digital_signals = sorted(list(all_digital))
                         st.session_state.analog_signals = sorted(list(all_analog))
+                        st.session_state.selection_order = []  # 신호 분류가 바뀌면 선택 순서도 초기화
+                        st.session_state.default_signals_applied = False  # 디폴트 적용 상태도 초기화
                 
                 if st.session_state.data_dict:
                     st.success(f"총 {len(st.session_state.data_dict)}개 파일이 성공적으로 로드되었습니다.")
+                    
+                    # 디폴트 신호 자동 선택 적용 (데이터 로드 후 한 번만)
+                    if not st.session_state.default_signals_applied and (st.session_state.digital_signals or st.session_state.analog_signals):
+                        apply_default_signal_selection()
+                        matched_count = len([s for s in st.session_state.selection_order if s])
+                        st.info(f"💡 디폴트 신호 중 {matched_count}개가 자동으로 선택되었습니다. 필요에 따라 선택을 변경할 수 있습니다.")
                     
                     # 유사한 온도의 파일 추천
                     similar_files, ref_filename, ref_temps, ref_time, ref_cop_type = find_similar_files_by_temp(
@@ -661,6 +892,19 @@ def main():
                         st.header("4단계: 디지털 신호 분석")
                         st.markdown("각 신호를 확인하고 관심 있는 신호를 선택하세요.")
                         
+                        # 미리보기 언더샘플링 설정 추가
+                        preview_col1, preview_col2 = st.columns([2, 1])
+                        with preview_col1:
+                            digital_preview_undersampling = st.selectbox(
+                                "📊 4단계 미리보기 언더샘플링 레벨:",
+                                options=list(range(11)),  # 0~10
+                                index=3,  # 기본값 3
+                                format_func=lambda x: "언더샘플링 없음" if x == 0 else f"레벨 {x} (1/{x} 샘플링)",
+                                key="digital_preview_undersampling"
+                            )
+                        with preview_col2:
+                            st.info("높을수록 빠른 미리보기")
+                        
                         # 플롯 생성
                         digital_plots = create_signal_plots(
                             st.session_state.data_dict, 
@@ -668,7 +912,8 @@ def main():
                             "digital",
                             st.session_state.sampling_method,
                             st.session_state.max_points,
-                            st.session_state.color_mapping
+                            st.session_state.color_mapping,
+                            digital_preview_undersampling
                         )
                         
                         digital_checkboxes = display_signal_plots_with_checkboxes(digital_plots, "digital")
@@ -679,40 +924,100 @@ def main():
                     if st.session_state.analog_signals:
                         st.header("5단계: 아날로그 신호 분석")
                         
+                        # 미리보기 언더샘플링 설정 추가
+                        analog_preview_col1, analog_preview_col2 = st.columns([2, 1])
+                        with analog_preview_col1:
+                            analog_preview_undersampling = st.selectbox(
+                                "📊 5단계 미리보기 언더샘플링 레벨:",
+                                options=list(range(11)),  # 0~10
+                                index=3,  # 기본값 3
+                                format_func=lambda x: "언더샘플링 없음" if x == 0 else f"레벨 {x} (1/{x} 샘플링)",
+                                key="analog_preview_undersampling"
+                            )
+                        with analog_preview_col2:
+                            st.info("높을수록 빠른 미리보기")
+                        
                         analog_plots = create_signal_plots(
                             st.session_state.data_dict, 
                             st.session_state.analog_signals, 
                             "analog",
                             st.session_state.sampling_method,
                             st.session_state.max_points,
-                            st.session_state.color_mapping
+                            st.session_state.color_mapping,
+                            analog_preview_undersampling
                         )
                         
                         analog_checkboxes = display_signal_plots_with_checkboxes(analog_plots, "analog")
                     else:
                         analog_checkboxes = {}
                     
-                    # 6단계: 선택된 신호들을 plotly로 통합 플롯
+                    # 6단계: 선택된 신호들을 matplotlib로 통합 플롯
                     st.header("6단계: 선택된 신호 통합 분석")
                     
-                    # 선택된 신호들 수집
-                    selected_signals = []
+                    # 디폴트 신호 선택 버튼 추가
+                    col_reset, col_default = st.columns([1, 1])
+                    with col_reset:
+                        if st.button("🔄 모든 선택 해제"):
+                            st.session_state.reset_selections = True
+                            st.rerun()
+                    
+                    with col_default:
+                        if st.button("⭐ 디폴트 신호 선택"):
+                            st.session_state.apply_defaults = True
+                            st.rerun()
+                    
+                    # 언더샘플링 레벨 설정 UI 추가
+                    col1, col2 = st.columns([2, 1])
+                    with col1:
+                        undersampling_level = st.selectbox(
+                            "📊 6단계 플롯 언더샘플링 레벨:",
+                            options=list(range(11)),  # 0~10
+                            index=2,  # 기본값 2
+                            format_func=lambda x: "언더샘플링 없음 (원본 데이터)" if x == 0 else f"레벨 {x} (1/{x} 샘플링)"
+                        )
+                    with col2:
+                        st.info("높은 레벨일수록 더 빠른 플롯")
+                    
+                    # 선택된 신호들 수집 (선택 순서대로)
+                    all_selected = []
                     for signal, is_selected in digital_checkboxes.items():
                         if is_selected:
-                            selected_signals.append(signal)
+                            all_selected.append(signal)
                     
                     for signal, is_selected in analog_checkboxes.items():
                         if is_selected:
+                            all_selected.append(signal)
+                    
+                    # 선택 순서에 따라 정렬 - 개선된 로직
+                    selected_signals = []
+                    # 먼저 선택 순서에 있는 신호들을 순서대로 추가
+                    for signal in st.session_state.selection_order:
+                        if signal in all_selected:
                             selected_signals.append(signal)
                     
+                    # 선택 순서에 없지만 현재 선택된 신호들을 마지막에 추가 (혹시 모를 경우를 대비)
+                    for signal in all_selected:
+                        if signal not in selected_signals:
+                            selected_signals.append(signal)
+                            # 선택 순서에도 추가
+                            if signal not in st.session_state.selection_order:
+                                st.session_state.selection_order.append(signal)
+                    
                     if selected_signals:
-                        st.write(f"**선택된 신호**: {', '.join(selected_signals)}")
-                        plot_selected_signals_plotly(
+                        st.write(f"**선택된 신호 ({len(selected_signals)}개)**: {', '.join(selected_signals)}")
+                        st.info("💡 신호들은 선택한 순서대로 플롯됩니다. 각 플롯박스는 고정된 높이로 표시됩니다.")
+                        
+                        # 선택 순서 디버깅 정보 (개발용 - 필요시 주석 해제)
+                        # st.write(f"**디버그 - 선택 순서**: {st.session_state.selection_order}")
+                        
+                        # matplotlib로 빠른 렌더링
+                        plot_selected_signals_matplotlib(
                             st.session_state.data_dict, 
                             selected_signals,
                             st.session_state.sampling_method,
                             st.session_state.max_points,
-                            st.session_state.color_mapping
+                            st.session_state.color_mapping,
+                            undersampling_level
                         )
                     else:
                         st.info("분석할 신호를 선택해주세요.")
@@ -727,8 +1032,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
