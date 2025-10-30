@@ -1,5 +1,8 @@
-streamlit
+streamlit==1.39.0
 pandas
 numpy
 openpyxl
 plotly
+PyYAML
+tables
+h5py
