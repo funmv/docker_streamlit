@@ -2,11 +2,14 @@
 >cd G:\2025\kafka\docker\load_tool
 
 >docker images
->docker build -t streamlit-load_tool .
->docker run -p 8501:8501 -v G:/2025/kafka/docker/load_tool:/app/data streamlit-load_tool
+>docker build -t streamlit-load-tool .
+>docker run -d --name streamlit-load-tool -p 8501:8501 -v "%CD%\output:/app/output" streamlit-load-tool
+# 아래는 windows에서 실행 시에 문제 발생(old)
+>docker run -p 8501:8501 -v G:/2025/kafka/docker/load_tool:/app/data streamlit-load-tool
+
 >docker rmi -f image-id
 
 >docker login
->docker tag streamlit-load_tool:latest funmv/streamlit-load_tool:latest
->docker push funmv/streamlit-load_tool:latest
->docker pull funmv/streamlit-load_tool:latest
+>docker tag streamlit-load_tool:latest funmv/streamlit-load-tool:latest
+>docker push funmv/streamlit-load-tool:latest
+>docker pull funmv/streamlit-load-tool:latest
