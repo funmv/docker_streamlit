@@ -1,0 +1,83 @@
+services:
+  nginx:
+    container_name: streamlit-nginx
+    build:
+      context: .
+      dockerfile: dockerfile
+    ports:
+      - "80:80"
+    networks:
+      - streamlit-network
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+    restart: always
+    depends_on:
+      - streamlit-dnndata
+      - streamlit-shifter
+    entrypoint: sh -c "nginx -g 'daemon off;'"
+
+  streamlit-dnndata:
+    container_name: streamlit-dnndata
+    image: funmv/streamlit-dnndata
+    networks:
+      - streamlit-network
+    volumes:
+      - /home/vislab/streamlit/dnndata:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+    restart: always
+
+  streamlit-shifter:
+    container_name: streamlit-shifter
+    image: funmv/streamlit-shifter
+    networks:
+      - streamlit-network
+    volumes:
+      - /home/vislab/streamlit/shifter:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+    restart: always
+
+
+
+  streamlit-load-tool:
+    container_name: streamlit-load-tool
+    image: funmv/streamlit-load-tool
+    networks:
+      - streamlit-network
+    volumes:
+      - /home/vislab/streamlit/load_tool:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 16G
+    restart: always
+
+  streamlit-crop-tool:
+    container_name: streamlit-crop-tool
+    image: funmv/streamlit-crop-tool
+    networks:
+      - streamlit-network
+    volumes:
+      - /home/vislab/streamlit/crop_tool:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 16G
+    restart: always
+
+
+networks:
+  streamlit-network:
+    driver: bridge
