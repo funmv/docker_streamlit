@@ -16,4 +16,11 @@
 >docker login
 >docker tag streamlit-load_tool:latest funmv/streamlit-load-tool:latest
 >docker push funmv/streamlit-load-tool:latest
+
 >docker pull funmv/streamlit-load-tool:latest
+
+####### ubuntu install guide ######
+# --remove-orphans: Remove unused containers
+###################################
+> docker compose down
+> docker compose up -d --build --remove-orphans  
