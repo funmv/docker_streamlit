@@ -1,4 +1,5 @@
 G:\2025\reflex\app에 계층화시킨 리펙토링 코드
+>streamlit run main.py --server.maxUploadSize 1000
 
 ```
 app/
@@ -16,6 +17,7 @@ app/
     ├── __init__.py
     └── yaml_utils.py         # YAML 설정 유틸리티
 ```
+
 
 
 
