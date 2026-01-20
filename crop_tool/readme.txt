@@ -4,7 +4,7 @@
 >docker images
 >docker build -t streamlit-crop-tool .
 # 8502:8501로 할 때는 Dockerfile도 수정해야 함
->docker run -d --name streamlit-load-tool -p 8501:8501 -v "%CD%\output:/app/output" streamlit-load-tool
+>docker run -d --name streamlit-crop-tool -p 8501:8501 -v "%CD%\output:/app/output" streamlit-crop-tool
 #background 실행이므로 제거할 때는 
 >docker rm -f [container-id]
 
