@@ -17,3 +17,10 @@
 >docker tag streamlit-crop-tool:latest funmv/streamlit-crop-tool:latest
 >docker push funmv/streamlit-crop-tool:latest
 >docker pull funmv/streamlit-crop-tool:latest
+
+
+####### ubuntu install guide ######
+# --remove-orphans: Remove unused containers
+###################################
+> docker compose down
+> docker compose up -d --build --remove-orphans  
