@@ -4,3 +4,5 @@ numpy
 openpyxl
 matplotlib
 plotly
+tables
+pyarrow
