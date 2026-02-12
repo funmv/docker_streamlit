@@ -9,29 +9,42 @@ import zipfile
 import json                    
 from datetime import datetime, timedelta  
 
-
 # =================================================================================
-# 한글 폰트 설정
+# Utils 모듈에서 함수 import
 # =================================================================================
-def setup_korean_font():
-    """한글 폰트 설정 함수"""
-    try:
-        from matplotlib import font_manager, rc
-        # Windows 환경
-        font_name = font_manager.FontProperties(fname="c:/Windows/Fonts/malgun.ttf").get_name()
-        rc('font', family=font_name)
-        plt.rcParams['axes.unicode_minus'] = False
-    except:
-        try:
-            # Linux 환경
-            from matplotlib import font_manager, rc
-            font_path = "/usr/share/fonts/truetype/nanum/NanumGothic.ttf"
-            font_name = font_manager.FontProperties(fname=font_path).get_name()
-            rc('font', family=font_name)  
-            plt.rcParams['axes.unicode_minus'] = False
-        except:
-            # 폰트 로드 실패 시 기본 폰트 사용
-            plt.rcParams['axes.unicode_minus'] = False
+from utils.font_utils import setup_korean_font
+from utils.file_utils import (
+    load_data_file,
+    load_feather_file,
+    handle_file_upload,
+    handle_batch_file_upload,
+    handle_multi_file_upload,
+    save_dataframe_to_buffer,
+    create_zip_download
+)
+from utils.data_utils import (
+    apply_time_delay,
+    get_data_segment
+)
+from utils.plot_utils import (
+    create_multivariate_plot,
+    create_combined_plot,
+    create_multi_file_plot
+)
+from utils.batch_utils import (
+    process_batch_files,
+    split_files_train_val
+)
+from utils.dnn_utils import (
+    create_positional_encoding,
+    extract_time_features,
+    extract_dnn_samples_optimized,
+    extract_time_features_vectorized,
+    create_positional_encoding_vectorized,
+    extract_dnn_samples,
+    process_all_files_for_dnn,
+    save_dnn_dataset
+)
 
 # matplotlib 경고 제거를 위한 설정
 plt.rcParams['figure.max_open_warning'] = 50
@@ -41,722 +54,6 @@ plt.rcParams['figure.max_open_warning'] = 50
 # =================================================================================
 st.set_page_config(page_title="다변량 시계열 데이터 분석", layout="wide")
 setup_korean_font()
-
-# =================================================================================
-# 유틸리티 함수들
-# =================================================================================
-def load_feather_file(uploaded_file) -> pd.DataFrame:
-    """Feather 파일을 로드하는 함수"""
-    try:
-        df = pd.read_feather(uploaded_file)
-        return df
-    except Exception as e:
-        st.error(f"파일 로드 중 오류 발생: {str(e)}")
-        return None
-
-def apply_time_delay(df: pd.DataFrame, column: str, delay: int) -> pd.Series:
-    """시계열 데이터에 시간 지연을 적용하는 함수"""
-    if delay == 0:
-        return df[column]
-    elif delay > 0:
-        # 양수 지연: 미래 값을 현재로 이동 (앞쪽에 NaN 추가)
-        delayed_series = df[column].shift(-delay)
-    else:
-        # 음수 지연: 과거 값을 현재로 이동 (뒤쪽에 NaN 추가)
-        delayed_series = df[column].shift(-delay)
-    
-    return delayed_series
-
-def get_data_segment(df: pd.DataFrame, num_segments: int = 3, selected_segment: int = 0) -> pd.DataFrame:
-    """데이터를 등분하여 선택된 구간만 반환하는 함수"""
-    total_length = len(df)
-    segment_length = total_length // num_segments
-    
-    start_idx = selected_segment * segment_length
-    
-    # 마지막 구간의 경우 남은 모든 데이터 포함
-    if selected_segment == num_segments - 1:
-        end_idx = total_length
-    else:
-        end_idx = start_idx + segment_length
-    
-    return df.iloc[start_idx:end_idx].copy()
-
-def create_multivariate_plot(df: pd.DataFrame, selected_cols: List[str], 
-                           delays: Dict[str, int], downsample_rate: int = 1, 
-                           crosshair: bool = True, num_segments: int = 3, 
-                           selected_segment: int = 0) -> go.Figure:
-    """기본 다변량 시계열 플롯을 생성하는 함수"""
-    # 데이터 구간 선택
-    df_segment = get_data_segment(df, num_segments, selected_segment)
-    
-    fig = go.Figure()
-    
-    for col in selected_cols:
-        delay = delays.get(col, 0)
-        
-        # 1단계: 선택된 구간에서 시간 지연 적용
-        y_data = apply_time_delay(df_segment, col, delay)
-        
-        # 2단계: 지연 적용된 데이터에 다운샘플링 적용
-        y = y_data.iloc[::downsample_rate]
-        x = df_segment.index[::downsample_rate]
-        
-        # 지연값이 있는 경우 레이블에 표시
-        label = f"{col} (delay: {delay})" if delay != 0 else col
-        
-        fig.add_trace(go.Scattergl(
-            x=x,
-            y=y,
-            mode='lines',
-            name=label,
-            showlegend=True,
-            hoverinfo='x',
-            hovertemplate=''
-        ))
-    
-    # 구간 정보를 제목에 추가
-    segment_info = f"구간 {selected_segment + 1}/{num_segments}"
-    fig.update_layout(
-        title=f"📊 다변량 시계열 신호 분석 ({segment_info})",
-        dragmode="zoom",
-        xaxis=dict(
-            rangeslider=dict(visible=False),
-            title="시간 인덱스"
-        ),
-        yaxis=dict(
-            title="신호 값"
-        ),
-        height=600
-    )
-    
-    if crosshair:
-        fig.update_layout(
-            hovermode="x",
-            xaxis=dict(
-                showspikes=True,
-                spikemode='across',
-                spikesnap='cursor',
-                spikecolor="red",
-                spikethickness=1,
-                title="시간 인덱스"
-            ),
-            yaxis=dict(
-                showspikes=True,
-                spikemode='across',
-                spikesnap='cursor',
-                spikecolor="blue",
-                spikethickness=1,
-                title="신호 값"
-            )
-        )
-    
-    return fig
-
-def create_combined_plot(df: pd.DataFrame, delay_cols: List[str], 
-                        delays: Dict[str, int], reference_cols: List[str] = None,
-                        downsample_rate: int = 1, crosshair: bool = True,
-                        num_segments: int = 3, selected_segment: int = 0) -> go.Figure:
-    """지연 적용된 컬럼과 기준 컬럼을 함께 표시하는 플롯을 생성하는 함수"""
-    # 데이터 구간 선택
-    df_segment = get_data_segment(df, num_segments, selected_segment)
-    
-    fig = go.Figure()
-    
-    # 지연 적용된 컬럼들 추가
-    for col in delay_cols:
-        delay = delays.get(col, 0)
-        
-        # 1단계: 선택된 구간에서 시간 지연 적용
-        y_data = apply_time_delay(df_segment, col, delay)
-        
-        # 2단계: 지연 적용된 데이터에 다운샘플링 적용
-        y = y_data.iloc[::downsample_rate]
-        x = df_segment.index[::downsample_rate]
-        
-        # 지연값이 있는 경우 레이블에 표시
-        label = f"{col} (delay: {delay:+d})" if delay != 0 else f"{col} (original)"
-        
-        fig.add_trace(go.Scattergl(
-            x=x,
-            y=y,
-            mode='lines',
-            name=label,
-            showlegend=True,
-            hoverinfo='x',
-            hovertemplate='',
-            line=dict(width=2)  # 지연 적용된 신호는 두꺼운 선
-        ))
-    
-    # 기준 컬럼들 추가 (지연 적용 안됨)
-    if reference_cols:
-        for col in reference_cols:
-            # 1단계: 선택된 구간의 원본 데이터 (지연 적용 안함)
-            y_data = df_segment[col]
-            
-            # 2단계: 다운샘플링 적용
-            y = y_data.iloc[::downsample_rate]
-            x = df_segment.index[::downsample_rate]
-            
-            fig.add_trace(go.Scattergl(
-                x=x,
-                y=y,
-                mode='lines',
-                name=f"{col} (reference)",
-                showlegend=True,
-                hoverinfo='x',
-                hovertemplate='',
-                line=dict(width=1, dash='dot')  # 기준 신호는 점선으로 구분
-            ))
-    
-    # 구간 정보를 제목에 추가
-    segment_info = f"구간 {selected_segment + 1}/{num_segments}"
-    fig.update_layout(
-        title=f"📊 시간 지연 적용 신호 vs 기준 신호 비교 ({segment_info})",
-        dragmode="zoom",
-        xaxis=dict(
-            rangeslider=dict(visible=False),
-            title="시간 인덱스"
-        ),
-        yaxis=dict(
-            title="신호 값"
-        ),
-        height=600,
-        legend=dict(
-            orientation="v",
-            yanchor="top",
-            y=1,
-            xanchor="left",
-            x=1.02
-        )
-    )
-    
-    if crosshair:
-        fig.update_layout(
-            hovermode="x",
-            xaxis=dict(
-                showspikes=True,
-                spikemode='across',
-                spikesnap='cursor',
-                spikecolor="red",
-                spikethickness=1,
-                title="시간 인덱스"
-            ),
-            yaxis=dict(
-                showspikes=True,
-                spikemode='across',
-                spikesnap='cursor',
-                spikecolor="blue",
-                spikethickness=1,
-                title="신호 값"
-            )
-        )
-    
-    return fig
-
-def handle_file_upload(uploaded_files) -> None:
-    """파일 업로드를 처리하는 함수 (탭1용)"""
-    if uploaded_files:
-        st.session_state.uploaded_files = uploaded_files
-        st.session_state.current_file_index = 0
-        st.success(f"✅ {len(uploaded_files)}개 파일이 업로드되었습니다!")
-
-def handle_batch_file_upload(uploaded_files) -> None:
-    """배치 파일 업로드를 처리하는 함수 (탭2용)"""
-    if uploaded_files:
-        st.session_state.batch_uploaded_files = uploaded_files
-        st.success(f"✅ {len(uploaded_files)}개 파일이 배치 업로드되었습니다!")
-
-def handle_multi_file_upload(uploaded_files) -> None:
-    """다중 파일 업로드를 처리하는 함수 (탭3용)"""
-    if uploaded_files:
-        st.session_state.multi_uploaded_files = uploaded_files
-        st.success(f"✅ {len(uploaded_files)}개 파일이 다중 업로드되었습니다!")
-
-def create_multi_file_plot(selected_files: List, selected_features: List[str], 
-                          downsample_rate: int = 1, crosshair: bool = True,
-                          num_segments: int = 3, selected_segment: int = 0) -> go.Figure:
-    """선택된 파일들의 특징들을 플롯하는 함수 (탭1,2 방식과 동일)"""
-    fig = go.Figure()
-    
-    # 파일별로 처리
-    for file in selected_files:
-        try:
-            df = load_feather_file(file)
-            if df is None:
-                continue
-            
-            # 데이터 구간 선택
-            df_segment = get_data_segment(df, num_segments, selected_segment)
-            
-            # 선택된 특징들 처리
-            for feature in selected_features:
-                if feature in df.columns:
-                    # 1단계: 선택된 구간의 원본 데이터
-                    y_data = df_segment[feature]
-                    
-                    # 2단계: 다운샘플링 적용
-                    y = y_data.iloc[::downsample_rate]
-                    x = df_segment.index[::downsample_rate]
-                    
-                    # 파일명과 특징명을 포함한 레이블
-                    file_name = file.name.split('.')[0]  # 확장자 제거
-                    label = f"{file_name}_{feature}"
-                    
-                    fig.add_trace(go.Scattergl(
-                        x=x,
-                        y=y,
-                        mode='lines',
-                        name=label,
-                        showlegend=True,
-                        hoverinfo='x',
-                        hovertemplate=''
-                    ))
-                    
-        except Exception as e:
-            st.warning(f"⚠️ {file.name} 플롯 생성 중 오류: {str(e)}")
-            continue
-    
-    # 구간 정보를 제목에 추가
-    segment_info = f"구간 {selected_segment + 1}/{num_segments}"
-    fig.update_layout(
-        title=f"📊 다중 파일 특징 비교 ({segment_info})",
-        dragmode="zoom",
-        xaxis=dict(
-            rangeslider=dict(visible=False),
-            title="시간 인덱스"
-        ),
-        yaxis=dict(
-            title="신호 값"
-        ),
-        height=600
-    )
-    
-    if crosshair:
-        fig.update_layout(
-            hovermode="x",
-            xaxis=dict(
-                showspikes=True,
-                spikemode='across',
-                spikesnap='cursor',
-                spikecolor="red",
-                spikethickness=1,
-                title="시간 인덱스"
-            ),
-            yaxis=dict(
-                showspikes=True,
-                spikemode='across',
-                spikesnap='cursor',
-                spikecolor="blue",
-                spikethickness=1,
-                title="신호 값"
-            )
-        )
-    
-    return fig
-
-def process_batch_files(files: List, selected_features: List[str], delays: Dict[str, int]) -> List[Dict]:
-    """배치로 여러 파일에 지연 처리를 적용하는 함수"""
-    processed_files = []
-    
-    for i, file in enumerate(files):
-        try:
-            # 파일 로드
-            df = load_feather_file(file)
-            if df is None:
-                continue
-            
-            # 선택된 특징들이 파일에 존재하는지 확인
-            missing_features = [feat for feat in selected_features if feat not in df.columns]
-            if missing_features:
-                st.warning(f"⚠️ {file.name}에서 누락된 특징: {missing_features}")
-                continue
-            
-            # 지연 처리 적용
-            processed_df = df.copy()
-            for feature in selected_features:
-                delay = delays.get(feature, 0)
-                if delay != 0:
-                    shifted_series = apply_time_delay(df, feature, delay)
-                    processed_df[feature] = shifted_series
-            
-            # 처리된 데이터 정보 저장
-            processed_files.append({
-                'original_name': file.name,
-                'processed_name': f"{file.name.split('.')[0]}_batch_shifted.feather",
-                'dataframe': processed_df,
-                'shape': processed_df.shape,
-                'applied_delays': {feat: delays[feat] for feat in selected_features if delays.get(feat, 0) != 0}
-            })
-            
-        except Exception as e:
-            st.error(f"❌ {file.name} 처리 중 오류: {str(e)}")
-            continue
-    
-    return processed_files
-
-def create_zip_download(processed_files: List[Dict], zip_filename: str) -> bytes:
-    """처리된 파일들을 ZIP으로 압축하여 다운로드 가능한 형태로 만드는 함수"""
-    zip_buffer = io.BytesIO()
-    
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        for file_info in processed_files:
-            # DataFrame을 feather 형식으로 변환
-            feather_buffer = io.BytesIO()
-            file_info['dataframe'].reset_index(drop=True).to_feather(feather_buffer)
-            feather_buffer.seek(0)
-            
-            # ZIP에 파일 추가
-            zip_file.writestr(file_info['processed_name'], feather_buffer.getvalue())
-    
-    zip_buffer.seek(0)
-    return zip_buffer.getvalue()
-
-
-
-# DNN 관련 모든 함수들 - create_zip_download 함수 뒤에 추가하세요
-def create_positional_encoding(position: int, d_model: int = 8) -> np.ndarray:
-    """시간 포지션에 대한 positional encoding 생성"""
-    pe = np.zeros(d_model)
-    for i in range(0, d_model, 2):
-        pe[i] = np.sin(position / (10000 ** (i / d_model)))
-        if i + 1 < d_model:
-            pe[i + 1] = np.cos(position / (10000 ** (i / d_model)))
-    return pe
-
-def extract_time_features(timestamp_value, use_positional_encoding: bool = True) -> np.ndarray:
-    """timestamp로부터 시간 특징 추출"""
-    
-    # Timestamp 타입을 숫자로 변환
-    if hasattr(timestamp_value, 'timestamp'):
-        # pandas Timestamp 객체인 경우
-        timestamp_seconds = timestamp_value.timestamp()
-    elif isinstance(timestamp_value, (int, float)):
-        # 이미 숫자인 경우
-        timestamp_seconds = float(timestamp_value)
-    else:
-        try:
-            # 문자열이나 다른 형태인 경우 pandas로 변환 시도
-            timestamp_seconds = pd.to_datetime(timestamp_value).timestamp()
-        except:
-            # 변환 실패시 기본값 사용
-            timestamp_seconds = 0.0
-    
-    # 기본 시간 특징 (시, 분, 초)
-    hours = int((timestamp_seconds // 3600) % 24)
-    minutes = int((timestamp_seconds % 3600) // 60) 
-    seconds = int(timestamp_seconds % 60)
-    
-    # 정규화된 시간 특징 (0-1 범위)
-    time_features = np.array([
-        hours / 23.0,           # 시간 (0-23 -> 0-1)
-        minutes / 59.0,         # 분 (0-59 -> 0-1)
-        seconds / 59.0          # 초 (0-59 -> 0-1)
-    ])
-    
-    if use_positional_encoding:
-        # Positional encoding 추가
-        pe = create_positional_encoding(int(timestamp_seconds // 5))  # 5초 단위
-        time_features = np.concatenate([time_features, pe])
-    
-    return time_features
-
-def split_files_train_val(files: List, train_ratio: float = 0.8) -> Tuple[List, List]:
-    """파일들을 훈련용과 검증용으로 분할"""
-    total_files = len(files)
-    train_size = int(total_files * train_ratio)
-    
-    # 파일들을 섞어서 분할
-    import random
-    shuffled_files = files.copy()
-    random.shuffle(shuffled_files)
-    
-    train_files = shuffled_files[:train_size]
-    val_files = shuffled_files[train_size:]
-    
-    return train_files, val_files
-
-
-
-def extract_dnn_samples_optimized(df: pd.DataFrame, start_pos: int, end_pos: int, 
-                                  lookback: int, horizon: int, step_gap: int = 1,
-                                  timestamp_col: str = None, use_positional_encoding: bool = True) -> Tuple[np.ndarray, np.ndarray, List[Dict]]:
-    """최적화된 단일 파일에서 DNN 학습용 샘플 추출 (벡터화 연산 사용)"""
-    
-    # timestamp 컬럼 확인
-    if timestamp_col is None:
-        # timestamp 관련 컬럼 자동 검색
-        timestamp_candidates = [col for col in df.columns if 'time' in col.lower() or 'timestamp' in col.lower()]
-        if timestamp_candidates:
-            timestamp_col = timestamp_candidates[0]
-        else:
-            timestamp_col = df.columns[0]  # 첫 번째 컬럼을 timestamp로 사용
-    
-    # 특징 컬럼들 (timestamp 제외)
-    feature_cols = [col for col in df.columns if col != timestamp_col]
-    
-    # 데이터를 numpy 배열로 변환 (메모리 효율성과 속도 향상)
-    data_features_array = df[feature_cols].values.astype(np.float32)  # float32로 메모리 절약
-    
-    # 결측값 처리 (한 번에 처리)
-    data_features_array = np.nan_to_num(data_features_array, nan=0.0)
-    
-    # timestamp 배열 준비
-    if timestamp_col in df.columns:
-        timestamp_array = df[timestamp_col].values
-        # timestamp 결측값 처리
-        nan_mask = pd.isna(timestamp_array)
-        if nan_mask.any():
-            # 결측값을 인덱스 * 5초로 대체
-            timestamp_array = np.where(nan_mask, np.arange(len(df)) * 5, timestamp_array)
-    else:
-        # timestamp 컬럼이 없으면 인덱스 * 5초로 생성
-        timestamp_array = np.arange(len(df)) * 5
-    
-    # 시간 특징 배열 미리 계산 (벡터화)
-    time_features_array = extract_time_features_vectorized(timestamp_array, use_positional_encoding)
-    
-    # 데이터와 시간 특징 결합
-    combined_features_array = np.concatenate([time_features_array, data_features_array], axis=1)
-    
-    # 샘플 추출 범위 계산
-    max_pos = min(end_pos, len(df) - horizon)
-    actual_start = max(start_pos, lookback)
-    
-    # 유효한 샘플 위치들 계산
-    sample_positions = np.arange(actual_start, max_pos, step_gap)
-    
-    if len(sample_positions) == 0:
-        return np.array([]), np.array([]), []
-    
-    # 입력 시퀀스 인덱스 생성 (벡터화)
-    # shape: (num_samples, lookback)
-    input_indices = sample_positions[:, np.newaxis] - np.arange(lookback, 0, -1)[np.newaxis, :]
-    
-    # 출력 시퀀스 인덱스 생성 (벡터화)
-    # shape: (num_samples, horizon)
-    output_indices = sample_positions[:, np.newaxis] + np.arange(horizon)[np.newaxis, :]
-    
-    # 유효한 인덱스인지 확인
-    valid_input_mask = (input_indices >= 0) & (input_indices < len(combined_features_array))
-    valid_output_mask = (output_indices >= 0) & (output_indices < len(combined_features_array))
-    valid_samples_mask = valid_input_mask.all(axis=1) & valid_output_mask.all(axis=1)
-    
-    # 유효한 샘플만 선택
-    valid_sample_positions = sample_positions[valid_samples_mask]
-    valid_input_indices = input_indices[valid_samples_mask]
-    valid_output_indices = output_indices[valid_samples_mask]
-    
-    if len(valid_sample_positions) == 0:
-        return np.array([]), np.array([]), []
-    
-    # 벡터화된 인덱싱으로 샘플 추출
-    # input_samples shape: (num_samples, lookback, features)
-    input_samples = combined_features_array[valid_input_indices]
-    
-    # output_samples shape: (num_samples, horizon, features)
-    output_samples = combined_features_array[valid_output_indices]
-    
-    # 샘플 정보 생성 (벡터화)
-    sample_info = []
-    for i, pos in enumerate(valid_sample_positions):
-        sample_info.append({
-            'sample_index': i,
-            'input_start': int(pos - lookback),
-            'input_end': int(pos),
-            'output_start': int(pos),
-            'output_end': int(pos + horizon),
-            'current_position': int(pos)
-        })
-    
-    return input_samples.astype(np.float32), output_samples.astype(np.float32), sample_info
-
-
-def extract_time_features_vectorized(timestamp_array: np.ndarray, use_positional_encoding: bool = True) -> np.ndarray:
-    """벡터화된 시간 특징 추출"""
-    
-    # Timestamp 배열을 숫자로 변환
-    timestamp_seconds = np.zeros_like(timestamp_array, dtype=np.float64)
-    
-    for i, timestamp_value in enumerate(timestamp_array):
-        if hasattr(timestamp_value, 'timestamp'):
-            # pandas Timestamp 객체인 경우
-            timestamp_seconds[i] = timestamp_value.timestamp()
-        elif isinstance(timestamp_value, (int, float)):
-            # 이미 숫자인 경우
-            timestamp_seconds[i] = float(timestamp_value)
-        else:
-            try:
-                # 문자열이나 다른 형태인 경우 pandas로 변환 시도
-                timestamp_seconds[i] = pd.to_datetime(timestamp_value).timestamp()
-            except:
-                # 변환 실패시 기본값 사용
-                timestamp_seconds[i] = 0.0
-    
-    # 벡터화된 시간 특징 계산
-    hours = ((timestamp_seconds // 3600) % 24) / 23.0
-    minutes = ((timestamp_seconds % 3600) // 60) / 59.0
-    seconds = (timestamp_seconds % 60) / 59.0
-    
-    # 기본 시간 특징
-    time_features = np.column_stack([hours, minutes, seconds])
-    
-    if use_positional_encoding:
-        # Positional encoding 벡터화
-        positions = (timestamp_seconds // 5).astype(int)  # 5초 단위
-        pe_array = create_positional_encoding_vectorized(positions, d_model=8)
-        time_features = np.concatenate([time_features, pe_array], axis=1)
-    
-    return time_features.astype(np.float32)
-
-
-def create_positional_encoding_vectorized(positions: np.ndarray, d_model: int = 8) -> np.ndarray:
-    """벡터화된 positional encoding 생성"""
-    
-    # positions shape: (n,) -> (n, 1)
-    pos = positions[:, np.newaxis]
-    
-    # 인덱스 배열 생성
-    i = np.arange(0, d_model, 2)[np.newaxis, :]  # shape: (1, d_model//2)
-    
-    # 각도 계산 (벡터화)
-    angles = pos / (10000 ** (i / d_model))  # shape: (n, d_model//2)
-    
-    # PE 배열 초기화
-    pe = np.zeros((len(positions), d_model), dtype=np.float32)
-    
-    # sin과 cos 계산 (벡터화)
-    pe[:, 0::2] = np.sin(angles)  # 짝수 인덱스
-    if d_model % 2 == 1:
-        pe[:, 1::2] = np.cos(angles[:, :-1])  # 홀수 인덱스 (마지막 제외)
-    else:
-        pe[:, 1::2] = np.cos(angles)  # 홀수 인덱스
-    
-    return pe
-
-
-# 기존 함수를 최적화된 버전으로 대체하는 래퍼 함수
-def extract_dnn_samples(df: pd.DataFrame, start_pos: int, end_pos: int, 
-                       lookback: int, horizon: int, step_gap: int = 1,
-                       timestamp_col: str = None) -> Tuple[np.ndarray, np.ndarray, List[Dict]]:
-    """기존 함수 인터페이스를 유지하면서 최적화된 버전 호출"""
-    
-    # use_positional_encoding은 전역 설정에서 가져오거나 기본값 True 사용
-    try:
-        # Streamlit 세션 상태에서 설정 가져오기
-        import streamlit as st
-        use_positional_encoding = st.session_state.get('dnn_pos_encoding', True)
-    except:
-        use_positional_encoding = True
-    
-    return extract_dnn_samples_optimized(
-        df, start_pos, end_pos, lookback, horizon, step_gap, 
-        timestamp_col, use_positional_encoding
-    )
-
-
-
-def process_all_files_for_dnn(train_files: List, val_files: List, 
-                             start_pos: int, end_pos: int, lookback: int, 
-                             horizon: int, step_gap: int) -> Dict:
-    """모든 파일에서 DNN 데이터 추출"""
-    
-    train_inputs = []
-    train_outputs = []
-    train_info = []
-    
-    val_inputs = []
-    val_outputs = []
-    val_info = []
-    
-    # Training 파일들 처리
-    st.write("🔄 Training 데이터 추출 중...")
-    for i, file in enumerate(train_files):
-        try:
-            df = load_feather_file(file)
-            if df is not None:
-                input_arr, output_arr, info = extract_dnn_samples(
-                    df, start_pos, end_pos, lookback, horizon, step_gap
-                )
-                
-                if len(input_arr) > 0:
-                    train_inputs.append(input_arr)
-                    train_outputs.append(output_arr)
-                    
-                    # 파일 정보 추가
-                    for sample_info in info:
-                        sample_info['file_name'] = file.name
-                        sample_info['file_index'] = i
-                        sample_info['split'] = 'train'
-                    train_info.extend(info)
-                    
-                st.write(f"   ✅ {file.name}: {len(input_arr)}개 샘플 추출")
-        except Exception as e:
-            st.error(f"   ❌ {file.name}: 처리 실패 - {str(e)}")
-    
-    # Validation 파일들 처리
-    st.write("🔄 Validation 데이터 추출 중...")
-    for i, file in enumerate(val_files):
-        try:
-            df = load_feather_file(file)
-            if df is not None:
-                input_arr, output_arr, info = extract_dnn_samples(
-                    df, start_pos, end_pos, lookback, horizon, step_gap
-                )
-                
-                if len(input_arr) > 0:
-                    val_inputs.append(input_arr)
-                    val_outputs.append(output_arr)
-                    
-                    # 파일 정보 추가
-                    for sample_info in info:
-                        sample_info['file_name'] = file.name
-                        sample_info['file_index'] = i
-                        sample_info['split'] = 'validation'
-                    val_info.extend(info)
-                    
-                st.write(f"   ✅ {file.name}: {len(input_arr)}개 샘플 추출")
-        except Exception as e:
-            st.error(f"   ❌ {file.name}: 처리 실패 - {str(e)}")
-    
-    # 데이터 결합
-    final_train_inputs = np.concatenate(train_inputs, axis=0) if train_inputs else np.array([])
-    final_train_outputs = np.concatenate(train_outputs, axis=0) if train_outputs else np.array([])
-    
-    final_val_inputs = np.concatenate(val_inputs, axis=0) if val_inputs else np.array([])
-    final_val_outputs = np.concatenate(val_outputs, axis=0) if val_outputs else np.array([])
-    
-    return {
-        'train_inputs': final_train_inputs,
-        'train_outputs': final_train_outputs,
-        'train_info': train_info,
-        'val_inputs': final_val_inputs,
-        'val_outputs': final_val_outputs,
-        'val_info': val_info
-    }
-
-def save_dnn_dataset(dataset: Dict, metadata: Dict, filename: str) -> bytes:
-    """DNN 데이터셋을 NPY 형식으로 저장"""
-    
-    # 전체 데이터 구성
-    full_dataset = {
-        'metadata': metadata,
-        'train_inputs': dataset['train_inputs'],
-        'train_outputs': dataset['train_outputs'],
-        'train_info': dataset['train_info'],
-        'val_inputs': dataset['val_inputs'],
-        'val_outputs': dataset['val_outputs'],
-        'val_info': dataset['val_info']
-    }
-    
-    # numpy save 형식으로 직렬화
-    buffer = io.BytesIO()
-    np.save(buffer, full_dataset, allow_pickle=True)
-    buffer.seek(0)
-    
-    return buffer.getvalue()
-
-
 
 
 # =================================================================================
@@ -781,10 +78,10 @@ def main():
         col1, col2 = st.columns([3, 1])
         
         with col1:
-            st.markdown("**FTR/Feather 파일을 직접 업로드하세요:**")
+            st.markdown("**FTR/Feather 또는 H5 파일을 직접 업로드하세요:**")
             uploaded_files = st.file_uploader(
-                "FTR/Feather 파일들을 선택하세요",
-                type=['ftr', 'feather'],
+                "FTR/Feather 또는 H5 파일들을 선택하세요",
+                type=['ftr', 'feather', 'h5', 'hdf5'],
                 accept_multiple_files=True
             )
         
@@ -809,7 +106,7 @@ def main():
             
             # 선택된 파일 로드
             selected_file = files[selected_file_index]
-            df = load_feather_file(selected_file)
+            df = load_data_file(selected_file)
             
             if df is not None:
                 st.success(f"✅ {selected_file.name} 로딩 완료! Shape: {df.shape}")
@@ -958,16 +255,24 @@ def main():
                         st.subheader("💾 지연 적용 데이터 저장")
                         st.caption("원본에서 shift 선택된 특징을 제외하고, shift 처리된 특징을 포함하여 저장합니다.")
                         
-                        # 파일명 입력
-                        default_filename = f"{selected_file.name.split('.')[0]}_shifted"
-                        save_filename = st.text_input(
-                            "저장할 파일명 (확장자 제외)",
-                            value=default_filename,
-                            help="feather 형식으로 저장됩니다"
-                        )
-                        
+                        # 파일명과 형식 선택
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            default_filename = f"{selected_file.name.split('.')[0]}_shifted"
+                            save_filename = st.text_input(
+                                "저장할 파일명 (확장자 제외)",
+                                value=default_filename
+                            )
+                        with col2:
+                            save_format = st.selectbox(
+                                "파일 형식",
+                                options=['feather', 'h5'],
+                                index=0,
+                                help="저장할 파일 형식을 선택하세요"
+                            )
+
                         # 데이터 생성 및 다운로드 버튼
-                        if st.button("🔄 지연 적용 데이터 생성 및 다운로드", key="generate_shifted_data"):
+                        if st.button(f"🔄 지연 적용 데이터 생성 및 다운로드 ({save_format.upper()})", key="generate_shifted_data"):
                             try:
                                 # 원본 데이터 복사
                                 shifted_df = df.copy()
@@ -1002,18 +307,17 @@ def main():
                                         st.write("**원본 유지된 특징:**")
                                         st.write(f"- {', '.join(unchanged_cols)}")
                                 
-                                # feather 형식으로 저장
-                                output_buffer = io.BytesIO()
-                                shifted_df.reset_index(drop=True).to_feather(output_buffer)
-                                output_buffer.seek(0)
-                                
+                                # 선택된 형식으로 저장
+                                file_data = save_dataframe_to_buffer(shifted_df, save_format)
+                                file_extension = save_format if save_format != 'feather' else 'feather'
+
                                 # 다운로드 버튼
                                 st.download_button(
-                                    label="💾 Feather 파일 다운로드",
-                                    data=output_buffer.getvalue(),
-                                    file_name=f"{save_filename}.feather",
+                                    label=f"💾 {save_format.upper()} 파일 다운로드",
+                                    data=file_data,
+                                    file_name=f"{save_filename}.{file_extension}",
                                     mime="application/octet-stream",
-                                    help="지연이 적용된 데이터를 feather 형식으로 다운로드"
+                                    help=f"지연이 적용된 데이터를 {save_format} 형식으로 다운로드"
                                 )
                                 
                                 st.success(f"✅ 지연 적용된 데이터가 성공적으로 생성되었습니다!")
@@ -1055,17 +359,17 @@ def main():
     # =================================================================================
     with tab2:
         st.header("🔄 배치 지연 처리")
-        st.markdown("여러 개의 FTR 파일에 동일한 지연 설정을 일괄 적용하여 처리합니다.")
-        
+        st.markdown("여러 개의 FTR/Feather 또는 H5 파일에 동일한 지연 설정을 일괄 적용하여 처리합니다.")
+
         # 배치 파일 업로드 섹션
         st.subheader("📁 배치 파일 업로드")
         col1, col2 = st.columns([3, 1])
-        
+
         with col1:
-            st.markdown("**여러 개의 FTR/Feather 파일을 업로드하세요:**")
+            st.markdown("**여러 개의 FTR/Feather 또는 H5 파일을 업로드하세요:**")
             batch_uploaded_files = st.file_uploader(
-                "배치 처리할 FTR/Feather 파일들을 선택하세요",
-                type=['ftr', 'feather'],
+                "배치 처리할 FTR/Feather 또는 H5 파일들을 선택하세요",
+                type=['ftr', 'feather', 'h5', 'hdf5'],
                 accept_multiple_files=True,
                 key="batch_file_uploader"
             )
@@ -1191,30 +495,45 @@ def main():
                         # 다운로드 섹션
                         st.subheader("💾 배치 처리 결과 다운로드")
                         
-                        # ZIP 파일명 설정
-                        default_zip_name = f"batch_shifted_files_{len(processed_files)}files"
-                        zip_filename = st.text_input(
-                            "ZIP 파일명 (확장자 제외)",
-                            value=default_zip_name,
-                            key="zip_filename_input"
-                        )
-                        
+                        # ZIP 파일명과 형식 설정
+                        col1, col2 = st.columns([3, 1])
+                        with col1:
+                            default_zip_name = f"batch_shifted_files_{len(processed_files)}files"
+                            zip_filename = st.text_input(
+                                "ZIP 파일명 (확장자 제외)",
+                                value=default_zip_name,
+                                key="zip_filename_input"
+                            )
+                        with col2:
+                            batch_save_format = st.selectbox(
+                                "파일 형식",
+                                options=['feather', 'h5'],
+                                index=0,
+                                key="batch_save_format",
+                                help="ZIP 내부 파일의 저장 형식"
+                            )
+
                         # ZIP 다운로드 버튼
-                        if st.button("📦 ZIP 파일로 일괄 다운로드", key="download_batch_zip"):
+                        if st.button(f"📦 ZIP 파일로 일괄 다운로드 ({batch_save_format.upper()})", key="download_batch_zip"):
                             try:
-                                with st.spinner("📦 ZIP 파일 생성 중..."):
-                                    zip_data = create_zip_download(processed_files, f"{zip_filename}.zip")
-                                
+                                with st.spinner(f"📦 {batch_save_format.upper()} 형식으로 ZIP 파일 생성 중..."):
+                                    # 파일명 확장자 업데이트
+                                    for file_info in processed_files:
+                                        original_name = file_info['original_name'].split('.')[0]
+                                        file_info['processed_name'] = f"{original_name}_batch_shifted.{batch_save_format}"
+
+                                    zip_data = create_zip_download(processed_files, f"{zip_filename}.zip", batch_save_format)
+
                                 st.download_button(
-                                    label="💾 ZIP 파일 다운로드",
+                                    label=f"💾 ZIP 파일 다운로드 ({batch_save_format.upper()})",
                                     data=zip_data,
                                     file_name=f"{zip_filename}.zip",
                                     mime="application/zip",
-                                    help="모든 처리된 파일을 ZIP으로 압축하여 다운로드"
+                                    help=f"모든 처리된 파일을 {batch_save_format} 형식으로 ZIP에 압축하여 다운로드"
                                 )
-                                
+
                                 st.success("✅ ZIP 파일이 생성되었습니다! 다운로드 버튼을 클릭하세요.")
-                                
+
                             except Exception as e:
                                 st.error(f"❌ ZIP 파일 생성 중 오류: {str(e)}")
                         
@@ -1229,14 +548,12 @@ def main():
                                     st.write(f"**{file_info['processed_name']}** ({file_info['shape'][0]:,} × {file_info['shape'][1]})")
                                 
                                 with col2:
-                                    # 개별 파일 다운로드
-                                    feather_buffer = io.BytesIO()
-                                    file_info['dataframe'].reset_index(drop=True).to_feather(feather_buffer)
-                                    feather_buffer.seek(0)
-                                    
+                                    # 개별 파일 다운로드 (배치와 동일한 형식 사용)
+                                    file_data = save_dataframe_to_buffer(file_info['dataframe'], batch_save_format)
+
                                     st.download_button(
                                         label="💾 다운로드",
-                                        data=feather_buffer.getvalue(),
+                                        data=file_data,
                                         file_name=file_info['processed_name'],
                                         mime="application/octet-stream",
                                         key=f"individual_download_{i}"
@@ -1249,17 +566,17 @@ def main():
     # =================================================================================
     with tab3:
         st.header("📊 다중 파일 시각화")
-        st.markdown("여러 개의 FTR 파일을 로드하여 동일한 특징들을 비교 시각화합니다.")
-        
+        st.markdown("여러 개의 FTR/Feather 또는 H5 파일을 로드하여 동일한 특징들을 비교 시각화합니다.")
+
         # 다중 파일 업로드 섹션
         st.subheader("📁 다중 파일 업로드")
         col1, col2 = st.columns([3, 1])
-        
+
         with col1:
-            st.markdown("**여러 개의 FTR/Feather 파일을 업로드하세요:**")
+            st.markdown("**여러 개의 FTR/Feather 또는 H5 파일을 업로드하세요:**")
             multi_uploaded_files = st.file_uploader(
-                "시각화할 FTR/Feather 파일들을 선택하세요",
-                type=['ftr', 'feather'],
+                "시각화할 FTR/Feather 또는 H5 파일들을 선택하세요",
+                type=['ftr', 'feather', 'h5', 'hdf5'],
                 accept_multiple_files=True,
                 key="multi_file_uploader"
             )
@@ -1991,16 +1308,16 @@ def main():
     with tab4:
         st.header("🎯 유사 기동 검색")
         st.markdown("기준 파일의 특정 온도 조건과 유사한 기동 패턴을 다른 파일들에서 검색합니다.")
-        
+
         # 다중 파일 업로드 섹션 (탭3과 동일)
         st.subheader("📁 다중 파일 업로드")
         col1, col2 = st.columns([3, 1])
-        
+
         with col1:
-            st.markdown("**여러 개의 FTR/Feather 파일을 업로드하세요:**")
+            st.markdown("**여러 개의 FTR/Feather 또는 H5 파일을 업로드하세요:**")
             search_uploaded_files = st.file_uploader(
-                "유사 기동 검색할 FTR/Feather 파일들을 선택하세요",
-                type=['ftr', 'feather'],
+                "유사 기동 검색할 FTR/Feather 또는 H5 파일들을 선택하세요",
+                type=['ftr', 'feather', 'h5', 'hdf5'],
                 accept_multiple_files=True,
                 key="search_file_uploader"
             )

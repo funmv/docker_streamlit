@@ -13,9 +13,9 @@ RUN apt-get update && apt-get install -y fonts-nanum
 COPY . .
 
 # Streamlit 기본 설정 (CLI 설정)
-ENV STREAMLIT_SERVER_HEADLESS true
-ENV STREAMLIT_SERVER_ENABLECORS false
-ENV STREAMLIT_SERVER_PORT 8501
+ENV STREAMLIT_SERVER_HEADLESS=true
+ENV STREAMLIT_SERVER_ENABLECORS=false
+ENV STREAMLIT_SERVER_PORT=8501
 
 # Streamlit 실행 명령
 CMD ["streamlit", "run", "shift_analyzer.py"]
