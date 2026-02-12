@@ -14,13 +14,7 @@ from .data_utils import (
     prepare_df_for_parquet,
     prepare_df_for_display
 )
-from .visualization import (
-    render_timeseries_plot,
-    render_scatter_plot,
-    render_histogram,
-    render_boxplot,
-    render_correlation_heatmap
-)
+
 from .ui_components import (
     render_config_tab,
     render_loading_tab,

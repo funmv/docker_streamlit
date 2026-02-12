@@ -18,10 +18,11 @@ from .data_utils import (
     save_to_hdf5_with_metadata, load_from_hdf5_with_metadata,
     safe_display_df, prepare_df_for_parquet, prepare_df_for_display
 )
-from .visualization import (
-    render_timeseries_plot, render_scatter_plot,
-    render_histogram, render_boxplot, render_correlation_heatmap
+from .visualization_plots import (
+    render_timeseries_plot, render_scatter_plot, render_histogram,
+    render_boxplot, render_correlation_heatmap
 )
+
 
 def render_config_tab():
     st.header("📋 YAML 설정")
@@ -556,6 +557,8 @@ def render_config_tab():
         st.code(dict_to_yaml_string(st.session_state.config), language='yaml')
 
 
+
+
 # ============================================
 # Tab 2: 데이터 로딩
 # ============================================
@@ -743,6 +746,7 @@ def render_loading_tab():
                             st.session_state.metadata = {
                                 'source_name': final_df_safe.attrs.get('source_name', 'unknown'),
                                 'header_metadata': final_df_safe.attrs.get('header_metadata', {}),
+                                'removed_columns': final_df_safe.attrs.get('removed_columns', []),  # 제거된 컬럼 정보 추가
                                 'shape': final_df_safe.shape,
                                 'columns': final_df_safe.columns.tolist(),
                                 'dtypes': {str(k): str(v) for k, v in final_df_safe.dtypes.items()}
@@ -763,6 +767,7 @@ def render_loading_tab():
                                 sheet: {
                                     'source_name': df.attrs.get('source_name', sheet),
                                     'header_metadata': df.attrs.get('header_metadata', {}),
+                                    'removed_columns': df.attrs.get('removed_columns', []),  # 제거된 컬럼 정보 추가
                                     'shape': df.shape,
                                     'columns': df.columns.tolist(),
                                     'dtypes': {str(k): str(v) for k, v in df.dtypes.items()}
@@ -864,7 +869,7 @@ def render_loading_tab():
                 logger.info(f"   .head() 후 - shape={preview_head.shape}")
                 logger.info(f"   safe_display_df 호출 전")
                 
-                st.dataframe(safe_display_df(preview_head), width='stretch')
+                st.dataframe(safe_display_df(preview_head), use_container_width=True)
             
             # 메타데이터
             if st.session_state.metadata:
@@ -872,7 +877,33 @@ def render_loading_tab():
                     meta = st.session_state.metadata
                     if 'header_metadata' in meta and meta['header_metadata']:
                         st.json(meta['header_metadata'])
-            
+
+            # 제거된 컬럼 정보
+            if st.session_state.metadata and 'removed_columns' in st.session_state.metadata:
+                removed_cols = st.session_state.metadata['removed_columns']
+                if removed_cols and len(removed_cols) > 0:
+                    with st.expander(f"🗑️ 제거된 중복 컬럼 ({len(removed_cols)}개)", expanded=True):
+                        st.warning(f"⚠️ 총 {len(removed_cols)}개의 중복 컬럼이 제거되었습니다.")
+
+                        # 테이블 형태로 표시
+                        removed_df = pd.DataFrame(removed_cols)
+
+                        # 컬럼 순서 정리
+                        cols_order = ['tag_name', 'description', 'unit', 'reason']
+                        cols_order = [c for c in cols_order if c in removed_df.columns]
+                        removed_df = removed_df[cols_order]
+
+                        # 컬럼명 한글로 변경
+                        removed_df.columns = ['태그명', '설명', '단위', '제거 이유'][:len(removed_df.columns)]
+
+                        st.dataframe(removed_df, use_container_width=True, hide_index=True)
+
+                        # 제거 이유별 통계
+                        st.caption("**제거 이유별 통계:**")
+                        reason_counts = pd.DataFrame(removed_cols)['reason'].value_counts()
+                        for reason, count in reason_counts.items():
+                            st.caption(f"  - {reason}: {count}개")
+
             # 데이터 통계 (원본 display_df 사용 - datetime 유지)
             with st.expander("📈 기본 통계"):
                 logger.info(f"📊 [기본통계] 시작")
@@ -1017,7 +1048,35 @@ def render_loading_tab():
                     meta = st.session_state.metadata[selected_sheet]
                     if 'header_metadata' in meta and meta['header_metadata']:
                         st.json(meta['header_metadata'])
-            
+
+            # 제거된 컬럼 정보 (다중 시트)
+            if st.session_state.metadata and selected_sheet in st.session_state.metadata:
+                meta = st.session_state.metadata[selected_sheet]
+                if 'removed_columns' in meta:
+                    removed_cols = meta['removed_columns']
+                    if removed_cols and len(removed_cols) > 0:
+                        with st.expander(f"🗑️ 제거된 중복 컬럼 ({len(removed_cols)}개)", expanded=True):
+                            st.warning(f"⚠️ 총 {len(removed_cols)}개의 중복 컬럼이 제거되었습니다.")
+
+                            # 테이블 형태로 표시
+                            removed_df = pd.DataFrame(removed_cols)
+
+                            # 컬럼 순서 정리
+                            cols_order = ['tag_name', 'description', 'unit', 'reason']
+                            cols_order = [c for c in cols_order if c in removed_df.columns]
+                            removed_df = removed_df[cols_order]
+
+                            # 컬럼명 한글로 변경
+                            removed_df.columns = ['태그명', '설명', '단위', '제거 이유'][:len(removed_df.columns)]
+
+                            st.dataframe(removed_df, use_container_width=True, hide_index=True)
+
+                            # 제거 이유별 통계
+                            st.caption("**제거 이유별 통계:**")
+                            reason_counts = pd.DataFrame(removed_cols)['reason'].value_counts()
+                            for reason, count in reason_counts.items():
+                                st.caption(f"  - {reason}: {count}개")
+
             # 데이터 통계 (원본 사용 - datetime 유지)
             with st.expander("📈 기본 통계"):
                 stats_df = df.describe(include='all')
@@ -1553,6 +1612,7 @@ def render_visualization_tab():
                             st.session_state.metadata = {
                                 'source_name': df.attrs.get('source_name', 'hdf5_file'),
                                 'header_metadata': df.attrs.get('header_metadata', {}),
+                                'removed_columns': df.attrs.get('removed_columns', []),  # 제거된 컬럼 정보 추가
                                 'shape': df.shape,
                                 'columns': df.columns.tolist(),
                                 'dtypes': {str(k): str(v) for k, v in df.dtypes.items()}
@@ -1594,6 +1654,7 @@ def render_visualization_tab():
                         st.session_state.metadata = {
                             'source_name': df.attrs.get('source_name', 'parquet_file'),
                             'header_metadata': df.attrs.get('header_metadata', {}),
+                            'removed_columns': df.attrs.get('removed_columns', []),  # 제거된 컬럼 정보 추가
                             'shape': df.shape,
                             'columns': df.columns.tolist(),
                             'dtypes': {str(k): str(v) for k, v in df.dtypes.items()}
@@ -1730,212 +1791,3 @@ def render_visualization_tab():
         render_boxplot(df_plot, numeric_cols)
     else:  # 상관관계 히트맵
         render_correlation_heatmap(df_plot, numeric_cols)
-
-
-def render_timeseries_plot(df, numeric_cols, datetime_cols):
-    """시계열 그래프"""
-    st.subheader("📈 시계열 그래프")
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # X축 옵션 생성
-        x_options = ["Index (순서)"]  # 인덱스 옵션 추가
-        
-        if datetime_cols:
-            x_options.extend(datetime_cols)  # datetime 컬럼 추가
-        
-        # 다른 모든 컬럼도 선택 가능하게 (datetime 제외)
-        other_cols = [col for col in df.columns.tolist() if col not in datetime_cols]
-        x_options.extend(other_cols)
-        
-        x_col = st.selectbox("X축", options=x_options, key='ts_x')
-
-        # Y축 선택 (다중 선택)
-        y_cols = st.multiselect("Y축 변수 (다중 선택 가능)", options=numeric_cols, key='ts_y')
-    
-    with col2:
-        plot_type = st.selectbox("그래프 타입", ['선 그래프', '점 그래프', '선+점'])
-        show_legend = st.checkbox("범례 표시", value=True)
-    
-    if y_cols:
-        # 메타데이터에서 단위와 태그 정보 가져오기
-        meta = {}
-        if st.session_state.metadata:
-            if isinstance(st.session_state.loaded_data, dict):
-                selected_sheet = list(st.session_state.loaded_data.keys())[0]
-                meta = st.session_state.metadata.get(selected_sheet, {}).get('header_metadata', {})
-            else:
-                meta = st.session_state.metadata.get('header_metadata', {})
-        
-        # 선택된 변수들의 정보 표시
-        if meta and ('unit' in meta or 'tag_name' in meta):
-            with st.expander("📋 선택된 변수 정보"):
-                info_data = []
-                for col in y_cols:
-                    try:
-                        col_idx = df.columns.tolist().index(col)
-                        unit = 'N/A'
-                        tag = 'N/A'
-                        
-                        if 'unit' in meta and col_idx < len(meta['unit']):
-                            unit_val = meta['unit'][col_idx]
-                            unit = str(unit_val) if pd.notna(unit_val) else 'N/A'
-                        
-                        if 'tag_name' in meta and col_idx < len(meta['tag_name']):
-                            tag_val = meta['tag_name'][col_idx]
-                            tag = str(tag_val) if pd.notna(tag_val) else 'N/A'
-                        
-                        info_data.append({
-                            '변수명': col,
-                            '단위': unit,
-                            '태그명': tag
-                        })
-                    except:
-                        continue
-                
-                if info_data:
-                    info_df = pd.DataFrame(info_data)
-                    st.dataframe(info_df, use_container_width=True)
-        
-        # 그래프 생성
-        fig = go.Figure()
-
-        mode = 'lines' if plot_type == '선 그래프' else 'markers' if plot_type == '점 그래프' else 'lines+markers'
-
-        # X축 데이터 결정
-        if x_col == "Index (순서)":
-            x_data = df.index
-            x_title = "Index"
-        else:
-            x_data = df[x_col]
-            x_title = x_col
-
-        for y_col in y_cols:
-            fig.add_trace(go.Scatter(
-                x=x_data,  # 변경
-                y=df[y_col],
-                mode=mode,
-                name=y_col,
-                connectgaps=False,  # 추가
-                line=dict(width=2) if 'lines' in mode else None,
-                marker=dict(size=6) if 'markers' in mode else None
-            ))
-
-        fig.update_layout(
-            title='시계열 데이터',
-            xaxis_title=x_title,  # 변경
-            yaxis_title='값',
-            hovermode='x unified',
-            showlegend=show_legend,
-            height=600
-        )
-
-        st.plotly_chart(fig, width=True)
-
-def render_scatter_plot(df, numeric_cols):
-    """산점도"""
-    st.subheader("🔵 산점도")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        x_col = st.selectbox("X축", options=numeric_cols, key='scatter_x')
-    with col2:
-        y_col = st.selectbox("Y축", options=numeric_cols, key='scatter_y')
-    with col3:
-        color_col = st.selectbox("색상 (선택)", options=[None] + numeric_cols, key='scatter_color')
-    
-    if x_col and y_col:
-        fig = px.scatter(
-            df,
-            x=x_col,
-            y=y_col,
-            color=color_col,
-            title=f'{x_col} vs {y_col}',
-            height=600
-        )
-        
-        st.plotly_chart(fig, width=True)
-
-
-def render_histogram(df, numeric_cols):
-    """히스토그램"""
-    st.subheader("📊 히스토그램")
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        selected_col = st.selectbox("변수 선택", options=numeric_cols, key='hist_col')
-    
-    with col2:
-        n_bins = st.slider("Bins 수", 10, 100, 30)
-    
-    if selected_col:
-        fig = px.histogram(
-            df,
-            x=selected_col,
-            nbins=n_bins,
-            title=f'{selected_col} 분포',
-            height=500
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # 기본 통계
-        with st.expander("📈 기본 통계"):
-            stats = df[selected_col].describe()
-            st.dataframe(stats, use_container_width=True)
-
-
-def render_boxplot(df, numeric_cols):
-    """박스플롯"""
-    st.subheader("📦 박스플롯")
-    
-    selected_cols = st.multiselect("변수 선택 (다중 선택)", options=numeric_cols, key='box_cols')
-    
-    if selected_cols:
-        fig = go.Figure()
-        
-        for col in selected_cols:
-            fig.add_trace(go.Box(
-                y=df[col],
-                name=col,
-                boxmean='sd'
-            ))
-        
-        fig.update_layout(
-            title='박스플롯',
-            yaxis_title='값',
-            height=600
-        )
-        
-        st.plotly_chart(fig, use_container_width=True)
-
-
-def render_correlation_heatmap(df, numeric_cols):
-    """상관관계 히트맵"""
-    st.subheader("🔥 상관관계 히트맵")
-    
-    selected_cols = st.multiselect(
-        "변수 선택 (다중 선택, 최소 2개)",
-        options=numeric_cols,
-        default=numeric_cols[:min(10, len(numeric_cols))],
-        key='corr_cols'
-    )
-    
-    if len(selected_cols) >= 2:
-        corr_matrix = df[selected_cols].corr()
-        
-        fig = px.imshow(
-            corr_matrix,
-            text_auto='.2f',
-            aspect='auto',
-            color_continuous_scale='RdBu_r',
-            title='상관관계 히트맵',
-            height=600
-        )
-        
-        st.plotly_chart(fig, width=True)
-    else:
-        st.warning("⚠️ 최소 2개 이상의 변수를 선택해주세요.")
