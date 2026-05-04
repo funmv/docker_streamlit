@@ -1,5 +1,6 @@
 >activate py310a
->cd G:\2025\kafka\docker\crop_tool
+# >cd G:\2025\kafka\docker\crop_tool
+>cd G:\2026\02_from_PNU\03_stremlit\01_crop_tool
 
 >docker images
 >docker build -t streamlit-crop-tool .
