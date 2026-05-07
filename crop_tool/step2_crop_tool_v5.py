@@ -152,6 +152,29 @@ def get_searchable_feature_options(df):
     return feature_options, feature_mapping
 
 
+def _wrap_feature_name(name, width):
+    """긴 특징명을 width 글자 단위로 줄바꿈 (_, 공백, - 우선 분할). plotly용 <br> 사용."""
+    if len(name) <= width:
+        return name
+    lines = []
+    remaining = name
+    while len(remaining) > width:
+        chunk = remaining[:width]
+        split_pos = -1
+        for sep in ['_', ' ', '-']:
+            pos = chunk.rfind(sep)
+            if pos > width // 2:  # 너무 앞에서 자르면 라인이 짧아져 비효율
+                split_pos = pos + 1  # 구분자 다음 위치에서 분할
+                break
+        if split_pos == -1:
+            split_pos = width  # 구분자 못 찾으면 강제 분할
+        lines.append(remaining[:split_pos])
+        remaining = remaining[split_pos:]
+    if remaining:
+        lines.append(remaining)
+    return '<br>'.join(lines)
+
+
 def plot_timeseries(data_dict, selected_files, selected_features):
     """시계열 데이터 플로팅"""
     if not selected_files or not selected_features:
@@ -197,11 +220,24 @@ def plot_timeseries(data_dict, selected_files, selected_features):
                     )
                 )
 
-        # y축 설정
+        # y축 설정 (인접 플롯 구별을 위해 짝/홀수 인덱스로 색 교차)
+        title_color = '#1f4e79' if feat_idx % 2 == 0 else '#c00000'  # 짝수: 다크블루, 홀수: 다크레드
+
+        # 플롯 픽셀 높이에 맞춰 한 라인 최대 글자 수 결정 후 여러 라인으로 줄바꿈
+        plot_pixel_height = 300 * n_features * height_per_plot
+        # Arial Black 20pt 기준 글자당 세로 폭 약 14px, 양 끝 여백 2글자 분량 확보
+        max_chars_per_line = max(5, int(plot_pixel_height / 14) - 2)
+        display_text = _wrap_feature_name(feature, max_chars_per_line)
+
         yaxis_dict = {
             'domain': [y_start, y_end],
             'anchor': 'x',
-            'title': feature
+            'title': {
+                'text': display_text,
+                'font': {'size': 20, 'family': 'Arial Black, sans-serif', 'color': title_color},
+                'standoff': 15
+            },
+            'tickfont': {'size': 13}
         }
 
         if feat_idx == 0:
@@ -209,12 +245,14 @@ def plot_timeseries(data_dict, selected_files, selected_features):
         else:
             fig.update_layout(**{f'yaxis{feat_idx + 1}': yaxis_dict})
 
-    # 레이아웃 설정
+    # 레이아웃 설정 (여러 라인 y축 제목 수용을 위해 왼쪽 마진 확보)
     fig.update_layout(
         height=300 * n_features,
-        xaxis=dict(title='Index'),
+        margin=dict(l=120),
+        xaxis=dict(title=dict(text='Index', font=dict(size=16)), tickfont=dict(size=13)),
         hovermode='x unified',
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        font=dict(size=14),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=13))
     )
 
     st.plotly_chart(fig, use_container_width=True)
