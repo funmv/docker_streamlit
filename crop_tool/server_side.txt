@@ -1,0 +1,359 @@
+streamlit.conf:
+===============
+
+upstream crop_tool_backend {
+    ip_hash;
+    server streamlit-crop-tool-1:8501;
+    server streamlit-crop-tool-2:8501;
+    server streamlit-crop-tool-3:8501;
+}
+
+server {
+    listen       80;
+    listen  [::]:80;
+
+    access_log  /var/log/nginx/streamlit.access.log;
+    error_log /var/log/nginx/streamlit.error.log;
+    
+    client_max_body_size 10g;
+    
+    location /db/ {
+        proxy_pass          http://streamlit-db:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /template/ {
+        proxy_pass          http://streamlit-template:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+    
+    location /dashboard/ {
+        proxy_pass          http://streamlit-dashboard:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /extract/ {
+        proxy_pass          http://streamlit-extract:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /viewer/ {
+        proxy_pass          http://streamlit-viewer:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /shifter/ {
+        proxy_pass          http://streamlit-shifter:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /dnndata/ {
+        proxy_pass          http://streamlit-dnndata:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /codediff/ {
+        proxy_pass          http://streamlit-codediff:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /tagviewer/ {
+        proxy_pass          http://streamlit-tagviewer:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+
+    location /load-tool/ {
+        proxy_pass          http://streamlit-load-tool:8501/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }
+ 
+
+    location /crop-tool/ {
+        proxy_pass          http://crop_tool_backend/;
+        proxy_set_header    Host                $http_host;
+        proxy_set_header    X-Real-IP           $remote_addr;
+        proxy_set_header    X-Forwarded-For     $proxy_add_x_forwarded_for;
+        proxy_redirect      off;
+        
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+
+        # ▼▼▼ 여기 3줄만 추가 ▼▼▼
+        proxy_read_timeout  86400s;
+        proxy_send_timeout  86400s;
+        proxy_buffering     off;
+    }
+}
+
+
+
+dockerfile:
+===============
+
+FROM nginx:stable-bookworm
+WORKDIR /
+
+RUN rm -rf /etc/nginx/conf.d/default.conf
+COPY streamlit.conf /etc/nginx/conf.d/
+
+
+
+
+docker-compose.yml:
+===================
+services:
+  nginx:
+    container_name: streamlit-nginx
+    build:
+      context: .
+      dockerfile: dockerfile
+    ports:
+      - "80:80"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+    restart: always
+    entrypoint: sh -c "
+      nginx -g 'daemon off;'"
+
+  streamlit-db:
+    container_name: streamlit-db
+    image: funmv/streamlit-db
+    volumes:
+      - /home/pashidl/streamlit/db:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
+
+  streamlit-template:
+    container_name: streamlit-template
+    image: funmv/streamlit-template
+    volumes:
+      - /home/pashidl/streamlit/template:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
+
+  streamlit-dashboard:
+    container_name: streamlit-dashboard
+    image: funmv/streamlit-dashboard
+    volumes:
+      - /home/pashidl/streamlit/dashboard:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 8G
+    restart: always
+
+  streamlit-extract:
+    container_name: streamlit-extract
+    image: funmv/streamlit-extract
+    environment:
+      - STREAMLIT_SERVER_MAX_UPLOAD_SIZE=1000
+      - STREAMLIT_SERVER_MAX_MESSAGE_SIZE=1000
+    volumes:
+      - /home/pashidl/streamlit/extract:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 8G
+    restart: always
+
+  streamlit-viewer:
+    container_name: streamlit-viewer
+    image: funmv/streamlit-viewer
+    volumes:
+      - /home/pashidl/streamlit/viewer:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    restart: always
+
+  streamlit-shifter:
+    container_name: streamlit-shifter
+    image: funmv/streamlit-shifter
+    volumes:
+      - /home/pashidl/streamlit/shifter:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+    restart: always
+
+  streamlit-dnndata:
+    container_name: streamlit-dnndata
+    image: funmv/streamlit-dnndata
+    volumes:
+      - /home/pashidl/streamlit/dnndata:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8G
+    restart: always
+
+  streamlit-codediff:
+    container_name: streamlit-codediff
+    image: funmv/streamlit-codediff
+    volumes:
+      - /home/pashidl/streamlit/codediff:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+    restart: always
+
+  streamlit-tagviewer:
+    container_name: streamlit-tagviewer
+    image: funmv/streamlit-tagviewer
+    volumes:
+      - /home/pashidl/streamlit/tagviewer:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 4G
+    restart: always
+
+  streamlit-load-tool:
+    container_name: streamlit-load-tool
+    image: funmv/streamlit-load-tool
+    volumes:
+      - /home/pashidl/streamlit/load_tool:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "8"
+          memory: 16G
+    restart: always
+
+
+
+  streamlit-crop-tool-1:
+    image: funmv/streamlit-crop-tool
+    container_name: streamlit-crop-tool-1
+    volumes:
+      - /home/pashidl/streamlit/crop_tool:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 8G
+    restart: always
+
+  streamlit-crop-tool-2:
+    image: funmv/streamlit-crop-tool
+    container_name: streamlit-crop-tool-2
+    volumes:
+      - /home/pashidl/streamlit/crop_tool:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 8G
+    restart: always
+
+  streamlit-crop-tool-3:
+    image: funmv/streamlit-crop-tool
+    container_name: streamlit-crop-tool-3
+    volumes:
+      - /home/pashidl/streamlit/crop_tool:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 8G
+    restart: always
+
+
+
+
+
+
+
+
